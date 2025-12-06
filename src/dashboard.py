@@ -32,14 +32,19 @@ st.set_page_config(
 def get_db_config():
     """Get database configuration from Streamlit secrets or environment variables."""
     # Try Streamlit secrets first (for Streamlit Cloud deployment)
-    if hasattr(st, 'secrets') and 'database' in st.secrets:
+    try:
+        # Access secrets directly - will raise exception if not configured
+        db_host = st.secrets["database"]["DB_HOST"]
         return {
-            'host': st.secrets.database.DB_HOST,
-            'port': int(st.secrets.database.DB_PORT),
-            'database': st.secrets.database.DB_NAME,
-            'user': st.secrets.database.DB_USER,
-            'password': st.secrets.database.DB_PASSWORD
+            'host': db_host,
+            'port': int(st.secrets["database"]["DB_PORT"]),
+            'database': st.secrets["database"]["DB_NAME"],
+            'user': st.secrets["database"]["DB_USER"],
+            'password': st.secrets["database"]["DB_PASSWORD"]
         }
+    except (KeyError, FileNotFoundError, Exception):
+        pass  # No secrets file or missing keys, fall back to environment variables
+
     # Fall back to environment variables (for local/Docker deployment)
     return {
         'host': os.environ.get('DB_HOST', 'localhost'),
