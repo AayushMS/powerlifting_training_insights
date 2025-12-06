@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: powerlifting_db
+    environment:
+      POSTGRES_USER: powerlifter
+      POSTGRES_PASSWORD: stronglifts
+      POSTGRES_DB: training_insights
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U powerlifter -d training_insights"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build: .
+    container_name: powerlifting_dashboard
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: training_insights
+      DB_USER: powerlifter
+      DB_PASSWORD: stronglifts
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./training_log.xlsx:/app/training_log.xlsx
+
+volumes:
+  pgdata:
