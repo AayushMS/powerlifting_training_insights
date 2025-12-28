@@ -359,27 +359,22 @@ def create_lift_section(lift: str, color: str):
                 annotation_position="right"
             )
 
-            # Add competition markers
+            # Add competition markers as star points
             lift_key = lift.lower().replace(' ', '_') if lift != 'Bench Press' else 'bench'
             for comp in COMPETITIONS:
                 comp_month = comp['date'].strftime('%Y-%m')
                 comp_weight = comp.get(lift_key if lift_key != 'bench_press' else 'bench', None)
                 if comp_weight and comp_month in monthly['month'].values:
-                    fig.add_vline(
-                        x=comp_month,
-                        line_dash="dash",
-                        line_color="#764ba2",
-                        annotation_text=f"🏆 {comp['name'].split()[0]}",
-                        annotation_position="top",
-                        annotation_font_size=10
-                    )
-                    # Add competition result as a point
+                    # Add competition result as a prominent star marker
                     fig.add_trace(go.Scatter(
                         x=[comp_month],
                         y=[comp_weight],
-                        mode='markers',
+                        mode='markers+text',
                         name=comp['name'],
-                        marker=dict(size=12, color='#764ba2', symbol='star'),
+                        marker=dict(size=15, color='#764ba2', symbol='star'),
+                        text=[f"🏆 {comp['name'].split()[0]}"],
+                        textposition="top center",
+                        textfont=dict(size=10),
                         hovertemplate=f"<b>{comp['name']}</b><br>Competition: {comp_weight}kg<extra></extra>"
                     ))
 
