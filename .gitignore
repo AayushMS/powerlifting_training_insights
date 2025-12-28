@@ -41,9 +41,9 @@ env/
 # Jupyter Notebook
 .ipynb_checkpoints/
 
-# Data files (keep sample, ignore actual training data)
-*.xlsx
-!sample_training_log.xlsx
+# Data files (keep training data for deployment)
+training_log.xlsx
+# Include new training data: Aayush man .xlsx
 
 # Database
 *.db
