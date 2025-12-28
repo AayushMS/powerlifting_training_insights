@@ -13,6 +13,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import sys
+from pathlib import Path
+
+# Add src directory to path for Streamlit Cloud compatibility
+src_path = Path(__file__).parent
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 
 from data_processor import (
     load_training_data,
