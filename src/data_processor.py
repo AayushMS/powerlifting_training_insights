@@ -11,10 +11,15 @@ import numpy as np
 from pathlib import Path
 from functools import lru_cache
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timedelta
 import re
 
 # Excel file path
 DATA_FILE = Path(__file__).parent.parent / "Aayush man .xlsx"
+
+# Training start date (estimated: 81 weeks before Dec 2025)
+# Week 1 started approximately April 2024
+TRAINING_START_DATE = datetime(2024, 4, 1)
 
 # Current PRs (updated based on latest data)
 CURRENT_PRS = {
@@ -40,6 +45,27 @@ COLORS = {
     'bench': '#4ECDC4',
     'deadlift': '#45B7D1'
 }
+
+# Known data anomalies to fix
+KNOWN_ANOMALIES = {
+    # Sheet name, exercise, wrong value -> correct value
+    (' building 45', 'Bench Press', 177.5): 117.5,
+}
+
+
+def week_to_date(week_order: int) -> datetime:
+    """Convert week order to approximate date."""
+    return TRAINING_START_DATE + timedelta(weeks=week_order - 1)
+
+
+def format_date(dt: datetime) -> str:
+    """Format date as 'Mon YYYY'."""
+    return dt.strftime('%b %Y')
+
+
+def format_date_short(dt: datetime) -> str:
+    """Format date as 'Mon'."""
+    return dt.strftime('%b')
 
 
 def canonicalize_exercise(movement: str) -> Tuple[str, str, bool]:
@@ -83,7 +109,7 @@ def canonicalize_exercise(movement: str) -> Tuple[str, str, bool]:
         return movement.strip(), 'accessory', False
 
 
-def parse_weight(val, prescribed=None) -> Optional[float]:
+def parse_weight(val, prescribed=None, sheet_name=None, exercise=None) -> Optional[float]:
     """Parse weight value from various formats."""
     if pd.isna(val):
         return None
@@ -112,6 +138,12 @@ def parse_weight(val, prescribed=None) -> Optional[float]:
 
     try:
         weight = float(val_str)
+
+        # Check for known anomalies
+        if sheet_name and exercise:
+            anomaly_key = (sheet_name, exercise, weight)
+            if anomaly_key in KNOWN_ANOMALIES:
+                return KNOWN_ANOMALIES[anomaly_key]
 
         # Outlier detection: if actual is >40% higher than prescribed, likely a typo
         if prescribed is not None and prescribed > 0:
@@ -234,8 +266,10 @@ def load_training_data() -> pd.DataFrame:
     """
     xl = pd.ExcelFile(DATA_FILE)
     all_data = []
+    skipped_exercises = []
 
     total_sheets = len(xl.sheet_names)
+    is_latest_week = True  # First sheet in Excel is the latest
 
     for sheet_idx, sheet_name in enumerate(xl.sheet_names):
         df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
@@ -243,11 +277,15 @@ def load_training_data() -> pd.DataFrame:
         # Week order: newest first in Excel, so reverse
         week_order = total_sheets - sheet_idx
 
+        # Calculate approximate date for this week
+        training_date = week_to_date(week_order)
+
         # Get block classification
         block_name, block_type = classify_block(sheet_name)
 
         current_day = None
         session_order = 0
+        exercises_in_week = set()
 
         for i, row in df.iterrows():
             cell0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
@@ -279,20 +317,36 @@ def load_training_data() -> pd.DataFrame:
             # Parse values
             try:
                 prescribed = parse_weight(row.iloc[2]) if len(row) > 2 else None
-                actual = parse_weight(row.iloc[3], prescribed=prescribed) if len(row) > 3 else None
+                actual_raw = row.iloc[3] if len(row) > 3 else None
+                actual = parse_weight(actual_raw, prescribed=prescribed, sheet_name=sheet_name, exercise=canonical)
                 rpe = parse_rpe(row.iloc[4]) if len(row) > 4 else None
                 sets = parse_sets(row.iloc[5]) if len(row) > 5 else None
                 reps = parse_reps(row.iloc[6]) if len(row) > 6 else None
             except (IndexError, ValueError):
                 continue
 
+            # Track if this is a main lift that was skipped (has prescribed but no actual)
+            if is_main and prescribed is not None and actual is None:
+                # Check if it's truly skipped (not just the latest week in progress)
+                if not is_latest_week:
+                    skipped_exercises.append({
+                        'week': sheet_name.strip(),
+                        'week_order': week_order,
+                        'training_date': training_date,
+                        'exercise': canonical,
+                        'prescribed_weight': prescribed
+                    })
+
             # Use actual weight if available, else prescribed
             weight = actual if actual is not None else prescribed
 
             if weight is not None and weight > 0:
+                exercises_in_week.add(canonical)
                 all_data.append({
                     'week': sheet_name.strip(),
                     'week_order': week_order,
+                    'training_date': training_date,
+                    'month_year': format_date(training_date),
                     'block_name': block_name,
                     'block_type': block_type,
                     'day': current_day,
@@ -305,8 +359,11 @@ def load_training_data() -> pd.DataFrame:
                     'actual_weight': weight,
                     'rpe': rpe,
                     'sets': sets or 1,
-                    'reps': reps or 1
+                    'reps': reps or 1,
+                    'is_latest_week': is_latest_week
                 })
+
+        is_latest_week = False  # Only first sheet is latest
 
     df = pd.DataFrame(all_data)
 
@@ -316,35 +373,142 @@ def load_training_data() -> pd.DataFrame:
     return df
 
 
+# Global cache for skipped exercises
+_skipped_exercises_cache = None
+
+
+def _get_skipped_exercises_internal() -> pd.DataFrame:
+    """Internal function to get skipped exercises, populated during load."""
+    global _skipped_exercises_cache
+
+    if _skipped_exercises_cache is None:
+        # Need to reparse to get skipped exercises
+        xl = pd.ExcelFile(DATA_FILE)
+        skipped_exercises = []
+        total_sheets = len(xl.sheet_names)
+        is_latest_week = True
+
+        for sheet_idx, sheet_name in enumerate(xl.sheet_names):
+            df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
+            week_order = total_sheets - sheet_idx
+            training_date = week_to_date(week_order)
+
+            for i, row in df.iterrows():
+                cell0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
+
+                canonical, category, is_main = canonicalize_exercise(cell0)
+                if canonical is None or not is_main:
+                    continue
+
+                try:
+                    prescribed = parse_weight(row.iloc[2]) if len(row) > 2 else None
+                    actual = parse_weight(row.iloc[3]) if len(row) > 3 else None
+                except:
+                    continue
+
+                if prescribed is not None and actual is None and not is_latest_week:
+                    skipped_exercises.append({
+                        'week': sheet_name.strip(),
+                        'week_order': week_order,
+                        'training_date': training_date,
+                        'exercise': canonical,
+                        'prescribed_weight': prescribed
+                    })
+
+            is_latest_week = False
+
+        _skipped_exercises_cache = pd.DataFrame(skipped_exercises) if skipped_exercises else pd.DataFrame()
+
+    return _skipped_exercises_cache
+
+
+def get_skipped_exercises() -> pd.DataFrame:
+    """Get exercises that were skipped (prescribed but not done)."""
+    return _get_skipped_exercises_internal()
+
+
 def get_main_lift_data() -> pd.DataFrame:
     """Get main lift progression data."""
     df = load_training_data()
     main_lifts = df[df['is_main_lift'] == True].copy()
 
     # Aggregate by week and exercise
-    progression = main_lifts.groupby(['week_order', 'week', 'canonical_name']).agg({
+    progression = main_lifts.groupby(['week_order', 'week', 'training_date', 'month_year', 'canonical_name']).agg({
         'actual_weight': 'max',
         'rpe': 'mean',
         'tonnage': 'sum',
         'sets': 'sum'
     }).reset_index()
 
-    progression.columns = ['week_order', 'week', 'exercise', 'top_weight', 'avg_rpe', 'tonnage', 'total_sets']
+    progression.columns = ['week_order', 'week', 'training_date', 'month_year', 'exercise', 'top_weight', 'avg_rpe', 'tonnage', 'total_sets']
 
     return progression.sort_values('week_order')
+
+
+def get_lift_specific_data(lift: str) -> Dict:
+    """Get detailed data for a specific lift."""
+    df = load_training_data()
+    lift_data = df[(df['is_main_lift'] == True) & (df['canonical_name'] == lift)].copy()
+
+    if lift_data.empty:
+        return {}
+
+    # Weekly progression
+    weekly = lift_data.groupby(['week_order', 'training_date', 'month_year']).agg({
+        'actual_weight': 'max',
+        'rpe': 'mean',
+        'tonnage': 'sum',
+        'sets': 'sum',
+        'reps': 'sum'
+    }).reset_index()
+
+    # Calculate monthly averages for smoother chart
+    lift_data['month'] = lift_data['training_date'].apply(lambda x: x.strftime('%Y-%m'))
+    monthly = lift_data.groupby('month').agg({
+        'actual_weight': 'max',
+        'rpe': 'mean',
+        'tonnage': 'sum',
+        'sets': 'sum',
+        'week_order': 'mean'
+    }).reset_index()
+
+    # RPE distribution
+    rpe_data = lift_data['rpe'].dropna()
+
+    # Progress metrics
+    first_10_weeks = weekly.head(10)['actual_weight'].mean()
+    last_10_weeks = weekly.tail(10)['actual_weight'].mean()
+    pr = lift_data['actual_weight'].max()
+    total_volume = lift_data['tonnage'].sum()
+
+    return {
+        'weekly': weekly,
+        'monthly': monthly,
+        'rpe_data': rpe_data,
+        'pr': pr,
+        'first_10_avg': first_10_weeks,
+        'last_10_avg': last_10_weeks,
+        'total_volume': total_volume,
+        'total_sets': lift_data['sets'].sum(),
+        'weeks_trained': lift_data['week_order'].nunique(),
+        'mean_rpe': rpe_data.mean() if len(rpe_data) > 0 else None,
+        'rpe_low_pct': (rpe_data < 7).sum() / len(rpe_data) * 100 if len(rpe_data) > 0 else 0,
+        'rpe_mid_pct': ((rpe_data >= 7) & (rpe_data <= 8.5)).sum() / len(rpe_data) * 100 if len(rpe_data) > 0 else 0,
+        'rpe_high_pct': (rpe_data > 8.5).sum() / len(rpe_data) * 100 if len(rpe_data) > 0 else 0,
+    }
 
 
 def get_weekly_volume() -> pd.DataFrame:
     """Get weekly volume summary by category."""
     df = load_training_data()
 
-    volume = df.groupby(['week_order', 'week', 'category']).agg({
+    volume = df.groupby(['week_order', 'week', 'training_date', 'month_year', 'category']).agg({
         'tonnage': 'sum',
         'sets': 'sum',
         'session_order': 'nunique'
     }).reset_index()
 
-    volume.columns = ['week_order', 'week', 'category', 'tonnage', 'total_sets', 'sessions']
+    volume.columns = ['week_order', 'week', 'training_date', 'month_year', 'category', 'tonnage', 'total_sets', 'sessions']
 
     return volume.sort_values('week_order')
 
@@ -352,7 +516,18 @@ def get_weekly_volume() -> pd.DataFrame:
 def get_rpe_distribution() -> pd.DataFrame:
     """Get RPE distribution data."""
     df = load_training_data()
-    return df[['canonical_name', 'category', 'is_main_lift', 'rpe']].dropna(subset=['rpe'])
+    return df[['canonical_name', 'category', 'is_main_lift', 'rpe', 'week_order', 'training_date']].dropna(subset=['rpe'])
+
+
+def get_rpe_by_lift() -> Dict[str, pd.Series]:
+    """Get RPE distribution for each main lift."""
+    rpe_df = get_rpe_distribution()
+    main_lifts = rpe_df[rpe_df['is_main_lift'] == True]
+
+    return {
+        lift: main_lifts[main_lifts['canonical_name'] == lift]['rpe']
+        for lift in ['Squat', 'Bench Press', 'Deadlift']
+    }
 
 
 def get_accessory_frequency() -> pd.DataFrame:
@@ -362,12 +537,30 @@ def get_accessory_frequency() -> pd.DataFrame:
 
     freq = accessories.groupby(['canonical_name', 'category']).agg({
         'week_order': 'nunique',
-        'sets': 'sum'
+        'sets': 'sum',
+        'tonnage': 'sum'
     }).reset_index()
 
-    freq.columns = ['canonical_name', 'category', 'frequency', 'total_sets']
+    freq.columns = ['canonical_name', 'category', 'frequency', 'total_sets', 'total_tonnage']
 
     return freq.sort_values('frequency', ascending=False)
+
+
+def get_accessory_by_category() -> Dict[str, pd.DataFrame]:
+    """Get accessories grouped by muscle category."""
+    accessories = get_accessory_frequency()
+
+    categories = {
+        'Back': accessories[accessories['category'] == 'back'],
+        'Arms': accessories[accessories['category'] == 'arms'],
+        'Legs': accessories[accessories['category'] == 'legs'],
+        'Core': accessories[accessories['category'] == 'core'],
+        'Pressing': accessories[accessories['category'] == 'pressing'],
+        'Posterior Chain': accessories[accessories['category'] == 'posterior'],
+        'Other': accessories[accessories['category'] == 'accessory'],
+    }
+
+    return {k: v for k, v in categories.items() if not v.empty}
 
 
 def get_block_comparison() -> pd.DataFrame:
@@ -379,12 +572,14 @@ def get_block_comparison() -> pd.DataFrame:
         'actual_weight': ['max', 'mean'],
         'tonnage': 'sum',
         'sets': 'sum',
-        'week_order': 'min'  # For ordering
+        'week_order': ['min', 'max'],
+        'training_date': ['min', 'max']
     }).reset_index()
 
-    blocks.columns = ['block_name', 'block_type', 'exercise', 'max_weight', 'avg_weight', 'tonnage', 'total_sets', 'block_order']
+    blocks.columns = ['block_name', 'block_type', 'exercise', 'max_weight', 'avg_weight',
+                      'tonnage', 'total_sets', 'start_week', 'end_week', 'start_date', 'end_date']
 
-    return blocks.sort_values('block_order')
+    return blocks.sort_values('start_week')
 
 
 def get_training_frequency() -> pd.DataFrame:
@@ -392,12 +587,12 @@ def get_training_frequency() -> pd.DataFrame:
     df = load_training_data()
 
     # Count unique sessions per week
-    freq = df.groupby(['week_order', 'week']).agg({
+    freq = df.groupby(['week_order', 'week', 'training_date', 'month_year']).agg({
         'session_order': 'max',
         'day': 'nunique'
     }).reset_index()
 
-    freq.columns = ['week_order', 'week', 'sessions_per_week', 'unique_days']
+    freq.columns = ['week_order', 'week', 'training_date', 'month_year', 'sessions_per_week', 'unique_days']
 
     # Also get lift-specific frequency
     main_lifts = df[df['is_main_lift'] == True]
@@ -417,9 +612,36 @@ def get_current_prs() -> Dict[str, float]:
     for lift in ['Squat', 'Bench Press', 'Deadlift']:
         lift_data = main_lifts[main_lifts['canonical_name'] == lift]
         if not lift_data.empty:
-            prs[lift] = lift_data['actual_weight'].max()
+            prs[lift] = float(lift_data['actual_weight'].max())
 
     return prs
+
+
+def get_pr_history() -> Dict[str, pd.DataFrame]:
+    """Get PR progression history for each lift."""
+    df = load_training_data()
+    main_lifts = df[df['is_main_lift'] == True]
+
+    pr_history = {}
+    for lift in ['Squat', 'Bench Press', 'Deadlift']:
+        lift_data = main_lifts[main_lifts['canonical_name'] == lift].sort_values('week_order')
+
+        # Track running max
+        running_max = 0
+        pr_dates = []
+        for _, row in lift_data.iterrows():
+            if row['actual_weight'] > running_max:
+                running_max = row['actual_weight']
+                pr_dates.append({
+                    'date': row['training_date'],
+                    'month_year': row['month_year'],
+                    'weight': running_max,
+                    'week': row['week']
+                })
+
+        pr_history[lift] = pd.DataFrame(pr_dates)
+
+    return pr_history
 
 
 def get_summary_stats() -> Dict:
@@ -439,9 +661,13 @@ def get_summary_stats() -> Dict:
     # Get PRs
     prs = get_current_prs()
 
+    # Date range
+    min_date = df['training_date'].min()
+    max_date = df['training_date'].max()
+
     return {
         'total_weeks': df['week_order'].nunique(),
-        'total_sessions': df['session_order'].sum(),
+        'total_sessions': int(df.groupby('week_order')['session_order'].max().sum()),
         'total_entries': len(df),
         'avg_sessions_per_week': freq['sessions_per_week'].mean(),
         'mean_rpe': rpe_data.mean() if len(rpe_data) > 0 else 0,
@@ -452,113 +678,107 @@ def get_summary_stats() -> Dict:
         'volume_squat': volume_by_lift.get('Squat', 0),
         'volume_bench': volume_by_lift.get('Bench Press', 0),
         'volume_deadlift': volume_by_lift.get('Deadlift', 0),
+        'total_volume': sum(volume_by_lift.values()),
         'current_prs': prs,
-        'total_pr': sum(prs.values())
+        'total_pr': sum(prs.values()),
+        'start_date': min_date,
+        'end_date': max_date,
+        'training_duration_months': (max_date - min_date).days / 30,
     }
+
+
+def get_monthly_summary() -> pd.DataFrame:
+    """Get monthly training summary."""
+    df = load_training_data()
+
+    df['month'] = df['training_date'].apply(lambda x: x.strftime('%Y-%m'))
+
+    monthly = df.groupby('month').agg({
+        'tonnage': 'sum',
+        'sets': 'sum',
+        'week_order': 'nunique',
+        'session_order': 'sum',
+        'training_date': 'first'
+    }).reset_index()
+
+    monthly['month_label'] = monthly['training_date'].apply(format_date)
+
+    return monthly.sort_values('month')
 
 
 def get_insights() -> List[Dict]:
     """Generate training insights based on data analysis."""
-    df = load_training_data()
+    from interpretations import (
+        interpret_rpe_average,
+        interpret_bench_squat_ratio,
+        interpret_deadlift_squat_ratio,
+        interpret_progress,
+        interpret_consistency,
+        interpret_sessions_per_week
+    )
+
     stats = get_summary_stats()
-    progression = get_main_lift_data()
+    prs = stats['current_prs']
 
     insights = []
 
-    # RPE Analysis
-    if stats['mean_rpe'] < 7:
-        insights.append({
-            'type': 'info',
-            'priority': 'medium',
-            'title': 'Conservative Training Intensity',
-            'message': f"Your average RPE is {stats['mean_rpe']:.1f}. Research suggests RPE 7.5-8.5 is optimal for strength gains. You have room to push harder on main lifts.",
-            'action': 'Consider increasing intensity on top sets to RPE 8-8.5'
-        })
-    elif stats['mean_rpe'] > 8.5:
-        insights.append({
-            'type': 'warning',
-            'priority': 'high',
-            'title': 'High Training Intensity',
-            'message': f"Your average RPE is {stats['mean_rpe']:.1f}. Sustained high RPE training increases injury risk and can impair recovery.",
-            'action': 'Consider adding more submaximal volume work'
-        })
-    else:
-        insights.append({
-            'type': 'success',
-            'priority': 'low',
-            'title': 'Well-Balanced Intensity',
-            'message': f"Your average RPE of {stats['mean_rpe']:.1f} is in the optimal range for strength development.",
-            'action': 'Maintain current approach'
-        })
-
-    # Lift ratio analysis
-    prs = stats['current_prs']
-    bench_squat_ratio = prs.get('Bench Press', 0) / prs.get('Squat', 1)
-
-    if bench_squat_ratio < 0.65:
-        insights.append({
-            'type': 'warning',
-            'priority': 'high',
-            'title': 'Bench Press Lagging',
-            'message': f"Your bench ({prs.get('Bench Press', 0)}kg) is {bench_squat_ratio*100:.0f}% of your squat ({prs.get('Squat', 0)}kg). The ideal ratio is 75-80%.",
-            'action': 'Prioritize bench volume and frequency. Add a 3rd bench day with technique work.'
-        })
-
-    # Volume analysis
-    bench_volume_ratio = stats['volume_bench'] / max(stats['volume_squat'], 1)
-    if bench_volume_ratio < 0.6:
-        insights.append({
-            'type': 'info',
-            'priority': 'medium',
-            'title': 'Low Bench Volume',
-            'message': f"Bench tonnage ({stats['volume_bench']:,.0f}kg) is only {bench_volume_ratio*100:.0f}% of squat tonnage ({stats['volume_squat']:,.0f}kg).",
-            'action': 'Increase bench press volume with more back-off sets'
-        })
-
-    # Progression analysis
-    for lift in ['Squat', 'Bench Press', 'Deadlift']:
-        lift_data = progression[progression['exercise'] == lift].sort_values('week_order')
-        if len(lift_data) >= 20:
-            first_10 = lift_data.head(10)['top_weight'].mean()
-            last_10 = lift_data.tail(10)['top_weight'].mean()
-            progress_pct = ((last_10 - first_10) / first_10 * 100) if first_10 > 0 else 0
-
-            if progress_pct > 10:
-                insights.append({
-                    'type': 'success',
-                    'priority': 'low',
-                    'title': f'{lift} Progressing Well',
-                    'message': f"Your {lift.lower()} has improved by {progress_pct:.1f}% (avg {first_10:.0f}kg → {last_10:.0f}kg).",
-                    'action': 'Continue current approach'
-                })
-            elif progress_pct < 0:
-                insights.append({
-                    'type': 'warning',
-                    'priority': 'medium',
-                    'title': f'{lift} Needs Attention',
-                    'message': f"Your recent {lift.lower()} weights are below your earlier average.",
-                    'action': 'Review technique, recovery, and programming'
-                })
-
-    # Frequency analysis
-    if stats['avg_sessions_per_week'] < 3:
-        insights.append({
-            'type': 'info',
-            'priority': 'medium',
-            'title': 'Low Training Frequency',
-            'message': f"Averaging {stats['avg_sessions_per_week']:.1f} sessions/week. Research supports 3-5 sessions for optimal progress.",
-            'action': 'Consider adding training days if schedule allows'
-        })
-
-    # Goal projections
-    total = stats['total_pr']
+    # RPE insight
     insights.append({
-        'type': 'info',
-        'priority': 'high',
-        'title': 'Goal Projection',
-        'message': f"Current total: {total:.1f}kg. With continued progression, a 650kg total appears achievable.",
-        'action': f"Focus on bench (current gap: ~{165 - prs.get('Bench Press', 135):.0f}kg to balanced ratio)"
+        'type': 'rpe',
+        'priority': 'medium' if stats['mean_rpe'] < 7 else 'low',
+        'title': 'Training Intensity',
+        'message': interpret_rpe_average(stats['mean_rpe']),
+        'icon': '💪'
     })
+
+    # Bench/Squat ratio
+    bench_ratio = interpret_bench_squat_ratio(prs.get('Bench Press', 0), prs.get('Squat', 1))
+    insights.append({
+        'type': 'ratio',
+        'priority': 'high' if bench_ratio['status'] == 'needs_attention' else 'low',
+        'title': f"{bench_ratio['emoji']} Bench vs Squat Balance",
+        'message': bench_ratio['detail'],
+        'action': bench_ratio['action'],
+        'icon': bench_ratio['emoji']
+    })
+
+    # Deadlift/Squat ratio
+    dl_ratio = interpret_deadlift_squat_ratio(prs.get('Deadlift', 0), prs.get('Squat', 1))
+    insights.append({
+        'type': 'ratio',
+        'priority': 'low' if dl_ratio['status'] == 'balanced' else 'medium',
+        'title': f"{dl_ratio['emoji']} Deadlift vs Squat Balance",
+        'message': dl_ratio['detail'],
+        'action': dl_ratio['action'],
+        'icon': dl_ratio['emoji']
+    })
+
+    # Training frequency
+    insights.append({
+        'type': 'frequency',
+        'priority': 'low',
+        'title': '📅 Training Frequency',
+        'message': interpret_sessions_per_week(stats['avg_sessions_per_week']),
+        'icon': '📅'
+    })
+
+    # Progress for each lift
+    for lift in ['Squat', 'Bench Press', 'Deadlift']:
+        lift_data = get_lift_specific_data(lift)
+        if lift_data and lift_data['first_10_avg'] and lift_data['last_10_avg']:
+            progress_msg = interpret_progress(
+                lift_data['first_10_avg'],
+                lift_data['last_10_avg'],
+                lift_data['weeks_trained'],
+                lift
+            )
+            insights.append({
+                'type': 'progress',
+                'priority': 'low',
+                'title': f'📈 {lift} Progress',
+                'message': progress_msg,
+                'icon': '📈'
+            })
 
     return sorted(insights, key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[x['priority']])
 
@@ -579,11 +799,15 @@ if __name__ == '__main__':
     stats = get_summary_stats()
     print(f"\nSummary Stats:")
     print(f"  Total weeks: {stats['total_weeks']}")
+    print(f"  Date range: {stats['start_date'].strftime('%b %Y')} - {stats['end_date'].strftime('%b %Y')}")
     print(f"  Avg sessions/week: {stats['avg_sessions_per_week']:.1f}")
     print(f"  Mean RPE: {stats['mean_rpe']:.2f}")
     print(f"  Current PRs: {stats['current_prs']}")
     print(f"  Total: {stats['total_pr']:.1f}kg")
 
-    print("\nInsights:")
-    for insight in get_insights():
-        print(f"  [{insight['priority'].upper()}] {insight['title']}: {insight['message']}")
+    print("\nSkipped exercises:")
+    skipped = get_skipped_exercises()
+    if not skipped.empty:
+        print(skipped.to_string())
+    else:
+        print("  None found")

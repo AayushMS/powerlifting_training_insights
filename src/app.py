@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Powerlifting Training Insights Dashboard
+Powerlifting Training Insights Dashboard v2
 
-A beautiful, data-driven dashboard for analyzing powerlifting training progress.
-No database required - reads directly from Excel.
+A beautiful, intuitive dashboard that anyone can understand.
+Uses dates instead of weeks, provides plain-English interpretations,
+and breaks down metrics by lift.
 """
 
 import streamlit as st
@@ -16,124 +17,137 @@ import numpy as np
 from data_processor import (
     load_training_data,
     get_main_lift_data,
+    get_lift_specific_data,
     get_weekly_volume,
     get_rpe_distribution,
+    get_rpe_by_lift,
     get_accessory_frequency,
+    get_accessory_by_category,
     get_block_comparison,
     get_training_frequency,
     get_summary_stats,
     get_insights,
     get_current_prs,
+    get_pr_history,
+    get_skipped_exercises,
+    get_monthly_summary,
     COLORS,
-    CURRENT_PRS,
     GOAL_PRS
+)
+
+from interpretations import (
+    interpret_rpe,
+    interpret_rpe_average,
+    interpret_bench_squat_ratio,
+    interpret_deadlift_squat_ratio,
+    interpret_tonnage,
+    interpret_goal_progress,
+    interpret_consistency,
+    interpret_sessions_per_week,
+    interpret_skipped_lift,
+    TERM_DEFINITIONS
 )
 
 # Page configuration
 st.set_page_config(
-    page_title="Powerlifting Training Insights",
+    page_title="Training Insights",
     page_icon="🏋️",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for beautiful styling
+# Custom CSS
 st.markdown("""
 <style>
-    /* Main container */
     .main .block-container {
-        padding-top: 2rem;
+        padding-top: 1rem;
         padding-bottom: 2rem;
-        max-width: 1400px;
+        max-width: 1200px;
     }
 
-    /* Hero metrics styling */
-    .hero-metric {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 16px;
+    /* Hero cards */
+    .hero-card {
+        background: linear-gradient(135deg, var(--color1) 0%, var(--color2) 100%);
+        padding: 1.2rem;
+        border-radius: 12px;
         color: white;
         text-align: center;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        margin-bottom: 0.5rem;
     }
 
-    .hero-metric h1 {
-        font-size: 3rem;
+    .hero-card h2 {
+        font-size: 2rem;
         font-weight: 700;
         margin: 0;
-        color: white;
+        color: white !important;
     }
 
-    .hero-metric p {
-        font-size: 1rem;
+    .hero-card p {
+        margin: 0.3rem 0 0 0;
         opacity: 0.9;
-        margin: 0.5rem 0 0 0;
+        font-size: 0.9rem;
     }
 
-    /* Lift cards */
-    .lift-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        border-left: 4px solid;
-        transition: transform 0.2s;
+    /* Metric interpretation */
+    .interpretation {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+        margin: 1rem 0;
+        font-size: 0.95rem;
+        line-height: 1.6;
     }
-
-    .lift-card:hover {
-        transform: translateY(-2px);
-    }
-
-    .lift-card.squat { border-left-color: #FF6B6B; }
-    .lift-card.bench { border-left-color: #4ECDC4; }
-    .lift-card.deadlift { border-left-color: #45B7D1; }
 
     /* Insight cards */
-    .insight-card {
-        background: white;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        margin-bottom: 1rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        border-left: 4px solid;
+    .insight-high {
+        background: #FFF5F5;
+        border-left: 4px solid #FF6B6B;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
     }
 
-    .insight-card.high { border-left-color: #FF6B6B; background: #FFF5F5; }
-    .insight-card.medium { border-left-color: #FFA94D; background: #FFF8F0; }
-    .insight-card.low { border-left-color: #51CF66; background: #F0FFF4; }
+    .insight-medium {
+        background: #FFF8F0;
+        border-left: 4px solid #FFA94D;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
+    }
+
+    .insight-low {
+        background: #F0FFF4;
+        border-left: 4px solid #51CF66;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
+    }
+
+    /* Definition tooltip */
+    .definition {
+        color: #667eea;
+        border-bottom: 1px dotted #667eea;
+        cursor: help;
+    }
 
     /* Section headers */
-    .section-header {
-        font-size: 1.75rem;
+    .section-title {
+        font-size: 1.5rem;
         font-weight: 600;
         color: #1a1a2e;
         margin: 2rem 0 1rem 0;
         padding-bottom: 0.5rem;
-        border-bottom: 3px solid #667eea;
+        border-bottom: 2px solid #667eea;
     }
 
-    /* Stat boxes */
-    .stat-box {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        text-align: center;
-    }
-
-    .stat-box .value {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #1a1a2e;
-    }
-
-    .stat-box .label {
-        font-size: 0.85rem;
-        color: #666;
-    }
-
-    /* Progress bar styling */
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    /* Lift section cards */
+    .lift-section {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        margin-bottom: 1.5rem;
     }
 
     /* Hide Streamlit branding */
@@ -141,12 +155,10 @@ st.markdown("""
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .hero-metric h1 {
-            font-size: 2rem;
-        }
-    }
+    /* RPE zones */
+    .rpe-easy { color: #51CF66; }
+    .rpe-moderate { color: #FCC419; }
+    .rpe-hard { color: #FF6B6B; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -160,526 +172,426 @@ def format_weight(w):
     return f"{w:.1f}"
 
 
-def create_hero_section(stats):
-    """Create the hero section with main stats."""
+def create_header(stats):
+    """Create the header with title and date range."""
     st.markdown("# 🏋️ Powerlifting Training Insights")
-    st.markdown("*81 weeks of training data • Data-driven analysis • Science-based recommendations*")
+
+    start = stats['start_date'].strftime('%B %Y')
+    end = stats['end_date'].strftime('%B %Y')
+    months = int(stats['training_duration_months'])
+
+    st.markdown(f"""
+    *{months} months of training data ({start} - {end}) • {stats['total_weeks']} weeks • {stats['total_sessions']} sessions*
+    """)
+
+
+def create_hero_section(stats):
+    """Create hero section with current PRs and goals."""
+    prs = stats['current_prs']
 
     st.markdown("---")
 
-    # Current PRs with goal progress
+    # Main lift PRs with progress to goal
     col1, col2, col3, col4 = st.columns(4)
 
-    prs = stats['current_prs']
+    lifts = [
+        ('Squat', '#FF6B6B', '#FF8E8E'),
+        ('Bench Press', '#4ECDC4', '#6EE7DF'),
+        ('Deadlift', '#45B7D1', '#65D7F1'),
+    ]
 
-    with col1:
-        squat_pr = prs.get('Squat', 0)
-        squat_goal = GOAL_PRS['Squat']
-        progress = min(100, (squat_pr / squat_goal) * 100)
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #FF6B6B 0%, #FF8E8E 100%); padding: 1.5rem; border-radius: 16px; text-align: center; color: white;">
-            <h1 style="font-size: 2.5rem; margin: 0; color: white;">{format_weight(squat_pr)} kg</h1>
-            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">Squat PR</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.progress(progress / 100)
-        st.caption(f"Goal: {squat_goal} kg ({progress:.0f}%)")
+    # Get progress data for trend indicators
+    lift_progress = {}
+    for lift, _, _ in lifts:
+        lift_data = get_lift_specific_data(lift)
+        if lift_data and lift_data['first_10_avg'] and lift_data['last_10_avg']:
+            gain = lift_data['last_10_avg'] - lift_data['first_10_avg']
+            lift_progress[lift] = gain
 
-    with col2:
-        bench_pr = prs.get('Bench Press', 0)
-        bench_goal = GOAL_PRS['Bench Press']
-        progress = min(100, (bench_pr / bench_goal) * 100)
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #4ECDC4 0%, #6EE7DF 100%); padding: 1.5rem; border-radius: 16px; text-align: center; color: white;">
-            <h1 style="font-size: 2.5rem; margin: 0; color: white;">{format_weight(bench_pr)} kg</h1>
-            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">Bench PR</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.progress(progress / 100)
-        st.caption(f"Goal: {bench_goal} kg ({progress:.0f}%)")
+    for col, (lift, c1, c2) in zip([col1, col2, col3], lifts):
+        with col:
+            pr = prs.get(lift, 0)
+            goal = GOAL_PRS.get(lift, pr)
+            progress = min(100, (pr / goal) * 100) if goal > 0 else 0
+            goal_info = interpret_goal_progress(pr, goal, lift)
 
-    with col3:
-        dl_pr = prs.get('Deadlift', 0)
-        dl_goal = GOAL_PRS['Deadlift']
-        progress = min(100, (dl_pr / dl_goal) * 100)
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #45B7D1 0%, #65D7F1 100%); padding: 1.5rem; border-radius: 16px; text-align: center; color: white;">
-            <h1 style="font-size: 2.5rem; margin: 0; color: white;">{format_weight(dl_pr)} kg</h1>
-            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">Deadlift PR</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.progress(progress / 100)
-        st.caption(f"Goal: {dl_goal} kg ({progress:.0f}%)")
+            # Get trend
+            gain = lift_progress.get(lift, 0)
+            trend = "↑" if gain > 0 else ("↓" if gain < 0 else "→")
+            trend_text = f"+{gain:.0f}kg" if gain > 0 else (f"{gain:.0f}kg" if gain < 0 else "stable")
+
+            st.markdown(f"""
+            <div class="hero-card" style="--color1: {c1}; --color2: {c2};">
+                <h2>{format_weight(pr)} kg</h2>
+                <p>{lift}</p>
+                <p style="font-size: 0.85rem; margin-top: 0.5rem;">{trend} {trend_text}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.progress(progress / 100)
+            st.caption(f"{goal_info['emoji']} {progress:.0f}% to {goal}kg goal")
 
     with col4:
         total = stats['total_pr']
         total_goal = sum(GOAL_PRS.values())
         progress = min(100, (total / total_goal) * 100)
+
+        # Calculate total trend
+        total_gain = sum(lift_progress.values())
+        total_trend = "↑" if total_gain > 0 else ("↓" if total_gain < 0 else "→")
+        total_trend_text = f"+{total_gain:.0f}kg" if total_gain > 0 else (f"{total_gain:.0f}kg" if total_gain < 0 else "stable")
+
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 16px; text-align: center; color: white;">
-            <h1 style="font-size: 2.5rem; margin: 0; color: white;">{format_weight(total)} kg</h1>
-            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">Total</p>
+        <div class="hero-card" style="--color1: #667eea; --color2: #764ba2;">
+            <h2>{format_weight(total)} kg</h2>
+            <p>Total</p>
+            <p style="font-size: 0.85rem; margin-top: 0.5rem;">{total_trend} {total_trend_text}</p>
         </div>
         """, unsafe_allow_html=True)
+
         st.progress(progress / 100)
-        st.caption(f"Goal: {total_goal} kg ({progress:.0f}%)")
+        st.caption(f"🎯 {progress:.0f}% to {total_goal}kg goal")
 
 
-def create_quick_stats(stats):
-    """Create quick stats row."""
-    st.markdown("### 📊 Training Overview")
+def create_summary_interpretation(stats):
+    """Create a plain-English summary of training."""
+    st.markdown("### 📝 What This Means")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.metric("Total Weeks", f"{stats['total_weeks']}")
-    with col2:
-        st.metric("Avg Sessions/Week", f"{stats['avg_sessions_per_week']:.1f}")
-    with col3:
-        st.metric("Mean RPE", f"{stats['mean_rpe']:.1f}")
-    with col4:
-        st.metric("Total Tonnage", f"{(stats['volume_squat'] + stats['volume_bench'] + stats['volume_deadlift'])/1000:.0f}t")
-    with col5:
-        wilks_estimate = stats['total_pr'] * 0.6  # Rough estimate
-        st.metric("Est. Wilks", f"~{wilks_estimate:.0f}")
-
-
-def create_progression_chart(df):
-    """Create main lift progression chart."""
-    st.markdown("### 📈 Lift Progression Over Time")
-
-    fig = go.Figure()
-
-    for lift in ['Squat', 'Bench Press', 'Deadlift']:
-        lift_data = df[df['exercise'] == lift].sort_values('week_order')
-        if not lift_data.empty:
-            # Add main line
-            fig.add_trace(go.Scatter(
-                x=lift_data['week_order'],
-                y=lift_data['top_weight'],
-                mode='lines+markers',
-                name=lift,
-                line=dict(color=COLORS.get(lift, '#666'), width=3),
-                marker=dict(size=6),
-                hovertemplate=f"<b>{lift}</b><br>Week %{{x}}<br>Weight: %{{y:.1f}} kg<extra></extra>"
-            ))
-
-            # Add trend line
-            if len(lift_data) > 10:
-                z = np.polyfit(lift_data['week_order'], lift_data['top_weight'], 1)
-                p = np.poly1d(z)
-                fig.add_trace(go.Scatter(
-                    x=lift_data['week_order'],
-                    y=p(lift_data['week_order']),
-                    mode='lines',
-                    name=f'{lift} Trend',
-                    line=dict(color=COLORS.get(lift, '#666'), width=1, dash='dash'),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
-
-    fig.update_layout(
-        height=450,
-        xaxis_title="Week",
-        yaxis_title="Weight (kg)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode='x unified',
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(gridcolor='#eee', zerolinecolor='#eee'),
-        yaxis=dict(gridcolor='#eee', zerolinecolor='#eee'),
-        margin=dict(l=60, r=20, t=40, b=60)
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def create_volume_analysis(volume_df):
-    """Create volume analysis charts."""
-    st.markdown("### 📊 Volume Analysis")
+    total_tonnage = stats['volume_squat'] + stats['volume_bench'] + stats['volume_deadlift']
+    tonnage_text = interpret_tonnage(total_tonnage)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        # Weekly tonnage by lift
-        main_lifts = volume_df[volume_df['category'].isin(['squat', 'bench', 'deadlift'])]
+        st.markdown(f"""
+        <div class="interpretation">
+        <strong>Your Training Journey</strong><br><br>
 
-        fig = px.area(
-            main_lifts,
-            x='week_order',
-            y='tonnage',
-            color='category',
-            color_discrete_map=COLORS,
-            title='Weekly Tonnage by Lift',
-            labels={'week_order': 'Week', 'tonnage': 'Tonnage (kg)', 'category': 'Lift'}
-        )
-        fig.update_layout(
-            height=350,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        Over the past **{int(stats['training_duration_months'])} months**, you've:
+        <ul>
+            <li>Trained **{stats['total_weeks']} weeks** with {stats['total_sessions']} total sessions</li>
+            <li>Averaged **{stats['avg_sessions_per_week']:.1f} sessions per week**</li>
+            <li>Lifted {tonnage_text}</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
-        # Weekly sets distribution
-        fig = px.bar(
-            main_lifts,
-            x='week_order',
-            y='total_sets',
-            color='category',
-            color_discrete_map=COLORS,
-            title='Weekly Sets by Lift',
-            labels={'week_order': 'Week', 'total_sets': 'Sets', 'category': 'Lift'},
-            barmode='stack'
-        )
-        fig.update_layout(
-            height=350,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # RPE interpretation
+        rpe_interp = interpret_rpe(stats['mean_rpe'])
+        st.markdown(f"""
+        <div class="interpretation">
+        <strong>Training Intensity</strong><br><br>
+
+        Your average effort level is **{stats['mean_rpe']:.1f}/10** ({rpe_interp['level']}).<br><br>
+
+        {rpe_interp['meaning']}<br><br>
+
+        <em>{rpe_interp['implication']}</em>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-def create_rpe_analysis(rpe_df, stats):
-    """Create RPE/intensity analysis."""
-    st.markdown("### 💪 Intensity Analysis (RPE)")
+def create_lift_section(lift: str, color: str):
+    """Create a detailed section for a single lift."""
+    lift_data = get_lift_specific_data(lift)
+    if not lift_data:
+        return
+
+    st.markdown(f"### {lift}")
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        # RPE histogram
-        main_rpe = rpe_df[rpe_df['is_main_lift'] == True].dropna(subset=['rpe'])
+        # Progress chart with monthly data for cleaner view
+        monthly = lift_data['monthly']
+        if not monthly.empty:
+            fig = go.Figure()
 
-        fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=monthly['month'],
+                y=monthly['actual_weight'],
+                mode='lines+markers',
+                name='Monthly Best',
+                line=dict(color=color, width=3),
+                marker=dict(size=8),
+                hovertemplate="<b>%{x}</b><br>Best: %{y:.1f} kg<extra></extra>"
+            ))
 
-        for lift in ['Squat', 'Bench Press', 'Deadlift']:
-            lift_rpe = main_rpe[main_rpe['canonical_name'] == lift]['rpe']
-            if not lift_rpe.empty:
-                fig.add_trace(go.Histogram(
-                    x=lift_rpe,
-                    name=lift,
-                    marker_color=COLORS.get(lift, '#666'),
-                    opacity=0.7,
-                    nbinsx=20
+            # Add trend line
+            if len(monthly) > 3:
+                z = np.polyfit(range(len(monthly)), monthly['actual_weight'], 1)
+                p = np.poly1d(z)
+                fig.add_trace(go.Scatter(
+                    x=monthly['month'],
+                    y=p(range(len(monthly))),
+                    mode='lines',
+                    name='Trend',
+                    line=dict(color=color, width=1, dash='dash'),
+                    hoverinfo='skip'
                 ))
 
-        # Add optimal zone
-        fig.add_vrect(
-            x0=7.5, x1=8.5,
-            fillcolor="green", opacity=0.1,
-            layer="below", line_width=0,
-            annotation_text="Optimal Zone",
-            annotation_position="top"
-        )
+            # Add PR line
+            fig.add_hline(
+                y=lift_data['pr'],
+                line_dash="dot",
+                line_color="gold",
+                annotation_text=f"PR: {format_weight(lift_data['pr'])}kg",
+                annotation_position="right"
+            )
 
-        fig.update_layout(
-            title='RPE Distribution (Main Lifts)',
-            xaxis_title='RPE',
-            yaxis_title='Frequency',
-            barmode='overlay',
-            height=350,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-        )
+            fig.update_layout(
+                height=300,
+                xaxis_title="Month",
+                yaxis_title="Weight (kg)",
+                showlegend=False,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=50, r=20, t=30, b=50),
+                xaxis=dict(tickangle=-45)
+            )
 
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        # RPE gauge and stats
-        st.markdown("#### RPE Breakdown")
-
-        # Stats
-        st.markdown(f"""
-        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Mean RPE</span>
-                <strong>{stats['mean_rpe']:.1f}</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Median RPE</span>
-                <strong>{stats['median_rpe']:.1f}</strong>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # RPE zone distribution
-        st.markdown("**Training Zone Distribution:**")
-        st.markdown(f"🟢 Easy (< 7): **{stats['rpe_low_pct']:.0f}%**")
-        st.progress(stats['rpe_low_pct'] / 100)
-        st.markdown(f"🟡 Moderate (7-8.5): **{stats['rpe_mid_pct']:.0f}%**")
-        st.progress(stats['rpe_mid_pct'] / 100)
-        st.markdown(f"🔴 Hard (> 8.5): **{stats['rpe_high_pct']:.0f}%**")
-        st.progress(stats['rpe_high_pct'] / 100)
-
-
-def create_block_comparison(block_df):
-    """Create block-by-block comparison."""
-    st.markdown("### 🔄 Block-by-Block Comparison")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        fig = px.bar(
-            block_df,
-            x='block_name',
-            y='max_weight',
-            color='exercise',
-            color_discrete_map=COLORS,
-            title='Max Weight by Training Block',
-            labels={'block_name': 'Block', 'max_weight': 'Max Weight (kg)', 'exercise': 'Lift'},
-            barmode='group'
-        )
-        fig.update_layout(
-            height=400,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis_tickangle=-45
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        fig = px.bar(
-            block_df,
-            x='block_name',
-            y='tonnage',
-            color='exercise',
-            color_discrete_map=COLORS,
-            title='Total Tonnage by Training Block',
-            labels={'block_name': 'Block', 'tonnage': 'Tonnage (kg)', 'exercise': 'Lift'},
-            barmode='group'
-        )
-        fig.update_layout(
-            height=400,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis_tickangle=-45
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # Key stats
+        st.metric("Personal Record", f"{format_weight(lift_data['pr'])} kg")
+
+        # Progress interpretation
+        if lift_data['first_10_avg'] and lift_data['last_10_avg']:
+            gain = lift_data['last_10_avg'] - lift_data['first_10_avg']
+            gain_pct = (gain / lift_data['first_10_avg']) * 100 if lift_data['first_10_avg'] > 0 else 0
+            st.metric(
+                "Progress",
+                f"+{gain:.1f} kg",
+                f"{gain_pct:.0f}% improvement"
+            )
+
+        # RPE breakdown
+        if lift_data['mean_rpe']:
+            rpe_info = interpret_rpe(lift_data['mean_rpe'])
+            st.markdown(f"""
+            **Avg Effort:** {lift_data['mean_rpe']:.1f}/10 ({rpe_info['level']})
+
+            - Easy sets: {lift_data['rpe_low_pct']:.0f}%
+            - Moderate: {lift_data['rpe_mid_pct']:.0f}%
+            - Hard sets: {lift_data['rpe_high_pct']:.0f}%
+            """)
 
 
-def create_lift_ratios(stats):
+def create_lift_comparison(stats):
     """Create lift ratio analysis."""
-    st.markdown("### ⚖️ Lift Ratios Analysis")
+    st.markdown("### ⚖️ Are Your Lifts Balanced?")
+
+    st.markdown("""
+    *In powerlifting, certain ratios between lifts indicate balanced strength development.
+    Here's how your lifts compare:*
+    """)
 
     prs = stats['current_prs']
     squat = prs.get('Squat', 220)
     bench = prs.get('Bench Press', 135)
     deadlift = prs.get('Deadlift', 262.5)
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        ratio = (bench / squat) * 100
-        ideal_min, ideal_max = 75, 80
-        status = "✅ Good" if ideal_min <= ratio <= ideal_max else "⚠️ Below ideal" if ratio < ideal_min else "⚠️ Above typical"
-
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=ratio,
-            number={'suffix': '%'},
-            title={'text': "Bench / Squat"},
-            gauge={
-                'axis': {'range': [50, 100]},
-                'bar': {'color': COLORS['Bench Press']},
-                'steps': [
-                    {'range': [50, 75], 'color': "#FFE5E5"},
-                    {'range': [75, 80], 'color': "#E5FFE5"},
-                    {'range': [80, 100], 'color': "#FFF5E5"}
-                ],
-                'threshold': {'line': {'color': "black", 'width': 2}, 'thickness': 0.75, 'value': 77.5}
-            }
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"Ideal: 75-80% | {status}")
-
-    with col2:
-        ratio = (deadlift / squat) * 100
-        ideal_min, ideal_max = 110, 125
-        status = "✅ Good" if ideal_min <= ratio <= ideal_max else "⚠️ Below ideal" if ratio < ideal_min else "⚠️ Above typical"
-
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=ratio,
-            number={'suffix': '%'},
-            title={'text': "Deadlift / Squat"},
-            gauge={
-                'axis': {'range': [90, 150]},
-                'bar': {'color': COLORS['Deadlift']},
-                'steps': [
-                    {'range': [90, 110], 'color': "#FFE5E5"},
-                    {'range': [110, 125], 'color': "#E5FFE5"},
-                    {'range': [125, 150], 'color': "#FFF5E5"}
-                ],
-                'threshold': {'line': {'color': "black", 'width': 2}, 'thickness': 0.75, 'value': 117.5}
-            }
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"Ideal: 110-125% | {status}")
-
-    with col3:
-        ratio = (bench / deadlift) * 100
-        ideal_min, ideal_max = 55, 65
-        status = "✅ Good" if ideal_min <= ratio <= ideal_max else "⚠️ Below ideal" if ratio < ideal_min else "⚠️ Above typical"
-
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=ratio,
-            number={'suffix': '%'},
-            title={'text': "Bench / Deadlift"},
-            gauge={
-                'axis': {'range': [40, 80]},
-                'bar': {'color': COLORS['Bench Press']},
-                'steps': [
-                    {'range': [40, 55], 'color': "#FFE5E5"},
-                    {'range': [55, 65], 'color': "#E5FFE5"},
-                    {'range': [65, 80], 'color': "#FFF5E5"}
-                ],
-                'threshold': {'line': {'color': "black", 'width': 2}, 'thickness': 0.75, 'value': 60}
-            }
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"Ideal: 55-65% | {status}")
-
-
-def create_insights_section(insights):
-    """Create insights and recommendations section."""
-    st.markdown("### 💡 Training Insights & Recommendations")
-
-    # Priority sorting
-    high_priority = [i for i in insights if i['priority'] == 'high']
-    medium_priority = [i for i in insights if i['priority'] == 'medium']
-    low_priority = [i for i in insights if i['priority'] == 'low']
-
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("#### 🔴 Priority Actions")
-        for insight in high_priority:
-            st.markdown(f"""
-            <div class="insight-card high">
-                <strong>{insight['title']}</strong>
-                <p style="margin: 0.5rem 0; color: #666;">{insight['message']}</p>
-                <p style="margin: 0; color: #228B22;"><em>→ {insight['action']}</em></p>
-            </div>
-            """, unsafe_allow_html=True)
+        # Bench vs Squat
+        bench_ratio = interpret_bench_squat_ratio(bench, squat)
 
-        st.markdown("#### 🟡 Improvements")
-        for insight in medium_priority:
-            st.markdown(f"""
-            <div class="insight-card medium">
-                <strong>{insight['title']}</strong>
-                <p style="margin: 0.5rem 0; color: #666;">{insight['message']}</p>
-                <p style="margin: 0; color: #228B22;"><em>→ {insight['action']}</em></p>
-            </div>
-            """, unsafe_allow_html=True)
+        status_color = {
+            'needs_attention': '#FF6B6B',
+            'developing': '#FFA94D',
+            'balanced': '#51CF66',
+            'bench_dominant': '#74C0FC'
+        }[bench_ratio['status']]
+
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid {status_color};">
+        <h4>{bench_ratio['emoji']} Bench Press vs Squat</h4>
+        <p>{bench_ratio['detail']}</p>
+        <p><strong>→ {bench_ratio['action']}</strong></p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
-        st.markdown("#### 🟢 What's Working")
-        for insight in low_priority:
-            st.markdown(f"""
-            <div class="insight-card low">
-                <strong>{insight['title']}</strong>
-                <p style="margin: 0.5rem 0; color: #666;">{insight['message']}</p>
-                <p style="margin: 0; color: #228B22;"><em>→ {insight['action']}</em></p>
-            </div>
-            """, unsafe_allow_html=True)
+        # Deadlift vs Squat
+        dl_ratio = interpret_deadlift_squat_ratio(deadlift, squat)
+
+        status_color = {
+            'squat_dominant': '#FFA94D',
+            'balanced': '#51CF66',
+            'deadlift_dominant': '#74C0FC'
+        }[dl_ratio['status']]
+
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid {status_color};">
+        <h4>{dl_ratio['emoji']} Deadlift vs Squat</h4>
+        <p>{dl_ratio['detail']}</p>
+        <p><strong>→ {dl_ratio['action']}</strong></p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-def create_accessory_analysis(accessory_df):
-    """Create accessory work analysis."""
-    st.markdown("### 🎯 Accessory Work Analysis")
+def create_training_consistency(stats, freq_df):
+    """Create training consistency section."""
+    st.markdown("### 📅 Training Consistency")
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        top_15 = accessory_df.head(15)
+        # Monthly training frequency
+        monthly = get_monthly_summary()
 
-        fig = px.bar(
-            top_15,
-            y='canonical_name',
-            x='frequency',
-            color='category',
-            title='Top 15 Accessory Exercises',
-            labels={'canonical_name': 'Exercise', 'frequency': 'Frequency', 'category': 'Category'},
-            orientation='h',
-            color_discrete_sequence=px.colors.qualitative.Set2
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=monthly['month_label'],
+            y=monthly['week_order'],
+            marker_color='#667eea',
+            hovertemplate="<b>%{x}</b><br>Weeks trained: %{y}<extra></extra>"
+        ))
+
+        avg_weeks = monthly['week_order'].mean()
+        fig.add_hline(
+            y=avg_weeks,
+            line_dash="dash",
+            line_color="#FF6B6B",
+            annotation_text=f"Avg: {avg_weeks:.1f} weeks/month"
         )
+
         fig.update_layout(
-            height=500,
-            yaxis={'categoryorder': 'total ascending'},
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=250,
+            xaxis_title="Month",
+            yaxis_title="Weeks Trained",
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=50, r=20, t=20, b=50),
+            xaxis=dict(tickangle=-45)
         )
+
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        # Category distribution
-        category_dist = accessory_df.groupby('category')['frequency'].sum().reset_index()
+        # Consistency stats
+        consistency_text = interpret_consistency(stats['total_weeks'], 81)
+        freq_text = interpret_sessions_per_week(stats['avg_sessions_per_week'])
 
-        fig = px.pie(
-            category_dist,
-            values='frequency',
-            names='category',
-            title='Accessory Categories',
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-        fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Key observations
-        st.markdown("#### Key Observations")
-        st.markdown("""
-        - **Strong back focus** with rows and pull-ups
-        - **Good core work** with planks
-        - **Consider adding** more direct tricep work for bench support
-        """)
+        st.markdown(f"""
+        <div class="interpretation">
+        {consistency_text}
+        <br><br>
+        {freq_text}
+        </div>
+        """, unsafe_allow_html=True)
 
 
-def create_training_frequency(freq_df):
-    """Create training frequency analysis."""
-    st.markdown("### 📅 Training Frequency")
+def create_skipped_sessions():
+    """Show skipped sessions in a helpful way."""
+    skipped = get_skipped_exercises()
 
-    fig = go.Figure()
+    if skipped.empty:
+        st.success("🎉 **Perfect consistency!** You haven't skipped any planned main lifts.")
+        return
 
-    fig.add_trace(go.Scatter(
-        x=freq_df['week_order'],
-        y=freq_df['sessions_per_week'],
-        mode='lines+markers',
-        name='Sessions/Week',
-        line=dict(color='#667eea', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(102, 126, 234, 0.1)'
-    ))
+    st.markdown("### ⏭️ Skipped Sessions")
 
-    # Add average line
-    avg_sessions = freq_df['sessions_per_week'].mean()
-    fig.add_hline(
-        y=avg_sessions,
-        line_dash="dash",
-        line_color="#FF6B6B",
-        annotation_text=f"Avg: {avg_sessions:.1f}",
-        annotation_position="right"
-    )
+    st.markdown("""
+    *These are sessions where a main lift was planned but not completed.
+    Everyone misses sessions sometimes - what matters is the overall pattern.*
+    """)
 
-    fig.update_layout(
-        height=300,
-        xaxis_title="Week",
-        yaxis_title="Sessions",
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        showlegend=False
-    )
+    # Summary by lift
+    skip_counts = skipped.groupby('exercise').size().to_dict()
 
-    st.plotly_chart(fig, use_container_width=True)
+    col1, col2, col3 = st.columns(3)
+
+    for col, lift in zip([col1, col2, col3], ['Squat', 'Bench Press', 'Deadlift']):
+        with col:
+            count = skip_counts.get(lift, 0)
+            interpretation = interpret_skipped_lift(lift, count, 81)
+            st.markdown(f"""
+            **{lift}**: {count} skipped
+
+            {interpretation}
+            """)
+
+
+def create_accessory_analysis():
+    """Create accessory exercise analysis."""
+    st.markdown("### 🎯 Supporting Exercises")
+
+    st.markdown("""
+    *Accessory exercises support your main lifts by strengthening weak points
+    and building muscle. Here's your focus:*
+    """)
+
+    accessories_by_cat = get_accessory_by_category()
+
+    cols = st.columns(3)
+
+    important_cats = ['Back', 'Arms', 'Legs', 'Core']
+
+    for i, cat in enumerate(important_cats[:3]):
+        with cols[i]:
+            if cat in accessories_by_cat:
+                cat_data = accessories_by_cat[cat].head(3)
+                st.markdown(f"**{cat}**")
+                for _, row in cat_data.iterrows():
+                    # Clean up exercise name
+                    name = row['canonical_name']
+                    if len(name) > 25:
+                        name = name[:22] + "..."
+                    st.markdown(f"• {name}")
+
+
+def create_insights_section():
+    """Create actionable insights section."""
+    st.markdown("### 💡 Key Insights & Recommendations")
+
+    insights = get_insights()
+
+    # Group by priority
+    high = [i for i in insights if i['priority'] == 'high']
+    medium = [i for i in insights if i['priority'] == 'medium']
+    low = [i for i in insights if i['priority'] == 'low']
+
+    if high:
+        st.markdown("#### 🔴 Priority Actions")
+        for insight in high:
+            st.markdown(f"""
+            <div class="insight-high">
+            <strong>{insight['title']}</strong><br>
+            {insight['message']}
+            </div>
+            """, unsafe_allow_html=True)
+
+    if medium:
+        st.markdown("#### 🟡 Suggested Improvements")
+        for insight in medium:
+            st.markdown(f"""
+            <div class="insight-medium">
+            <strong>{insight['title']}</strong><br>
+            {insight['message']}
+            </div>
+            """, unsafe_allow_html=True)
+
+    if low:
+        st.markdown("#### 🟢 What's Working")
+        for insight in low:
+            st.markdown(f"""
+            <div class="insight-low">
+            <strong>{insight['title']}</strong><br>
+            {insight['message']}
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def create_glossary():
+    """Create a glossary of powerlifting terms."""
+    with st.expander("📖 Glossary - What Do These Terms Mean?"):
+        for term, definition in TERM_DEFINITIONS.items():
+            st.markdown(f"**{term}**: {definition}")
 
 
 def main():
@@ -687,57 +599,54 @@ def main():
     try:
         # Load all data
         stats = get_summary_stats()
-        progression_df = get_main_lift_data()
-        volume_df = get_weekly_volume()
-        rpe_df = get_rpe_distribution()
-        block_df = get_block_comparison()
         freq_df = get_training_frequency()
-        accessory_df = get_accessory_frequency()
-        insights = get_insights()
 
         # Create sections
+        create_header(stats)
         create_hero_section(stats)
 
         st.markdown("---")
-        create_quick_stats(stats)
+        create_summary_interpretation(stats)
 
         st.markdown("---")
-        create_progression_chart(progression_df)
+        st.markdown("## 📊 Your Lifts in Detail")
+
+        # Individual lift sections
+        for lift, color in [('Squat', '#FF6B6B'), ('Bench Press', '#4ECDC4'), ('Deadlift', '#45B7D1')]:
+            create_lift_section(lift, color)
+            st.markdown("---")
+
+        create_lift_comparison(stats)
 
         st.markdown("---")
-        create_volume_analysis(volume_df)
+        create_training_consistency(stats, freq_df)
 
         st.markdown("---")
-        create_rpe_analysis(rpe_df, stats)
+        create_skipped_sessions()
 
         st.markdown("---")
-        create_lift_ratios(stats)
+        create_accessory_analysis()
 
         st.markdown("---")
-        create_block_comparison(block_df)
+        create_insights_section()
 
         st.markdown("---")
-        create_insights_section(insights)
-
-        st.markdown("---")
-        create_accessory_analysis(accessory_df)
-
-        st.markdown("---")
-        create_training_frequency(freq_df)
+        create_glossary()
 
         # Footer
         st.markdown("---")
         st.markdown("""
-        <div style="text-align: center; color: #999; padding: 2rem 0;">
-            <p>Built with ❤️ for powerlifting progress</p>
-            <p style="font-size: 0.8rem;">Data source: 81 weeks of training logs | Last updated: December 2025</p>
+        <div style="text-align: center; color: #999; padding: 1rem 0;">
+            <p>Built for powerlifters who want to understand their progress</p>
+            <p style="font-size: 0.8rem;">Data updates automatically when you add new training weeks</p>
         </div>
         """, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         st.info("Please ensure the training data file exists.")
-        raise e
+        import traceback
+        st.code(traceback.format_exc())
 
 
 if __name__ == '__main__':
