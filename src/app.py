@@ -31,8 +31,16 @@ from data_processor import (
     get_pr_history,
     get_skipped_exercises,
     get_monthly_summary,
+    get_block_summaries,
+    get_primary_secondary_day_analysis,
+    get_skip_summary,
+    calculate_goal_projections,
+    get_competition_context,
     COLORS,
-    GOAL_PRS
+    GOAL_PRS,
+    ATHLETE_PROFILE,
+    COMPETITIONS,
+    GOAL_PROJECTIONS
 )
 
 from interpretations import (
@@ -173,16 +181,27 @@ def format_weight(w):
 
 
 def create_header(stats):
-    """Create the header with title and date range."""
-    st.markdown("# 🏋️ Powerlifting Training Insights")
+    """Create the header with title, athlete profile, and date range."""
+    col1, col2 = st.columns([3, 1])
 
-    start = stats['start_date'].strftime('%B %Y')
-    end = stats['end_date'].strftime('%B %Y')
-    months = int(stats['training_duration_months'])
+    with col1:
+        st.markdown("# 🏋️ Powerlifting Training Insights")
 
-    st.markdown(f"""
-    *{months} months of training data ({start} - {end}) • {stats['total_weeks']} weeks • {stats['total_sessions']} sessions*
-    """)
+        start = stats['start_date'].strftime('%B %Y')
+        end = stats['end_date'].strftime('%B %Y')
+        months = int(stats['training_duration_months'])
+
+        st.markdown(f"""
+        *{months} months of training data ({start} - {end}) • {stats['total_weeks']} weeks • {stats['total_sessions']} sessions*
+        """)
+
+    with col2:
+        st.markdown(f"""
+        <div style="text-align: right; padding: 0.5rem;">
+            <strong>{ATHLETE_PROFILE['name']}</strong><br>
+            <span style="color: #666;">{ATHLETE_PROFILE['weight_class']} • {ATHLETE_PROFILE['bodyweight']}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def create_hero_section(stats):
@@ -339,6 +358,30 @@ def create_lift_section(lift: str, color: str):
                 annotation_text=f"PR: {format_weight(lift_data['pr'])}kg",
                 annotation_position="right"
             )
+
+            # Add competition markers
+            lift_key = lift.lower().replace(' ', '_') if lift != 'Bench Press' else 'bench'
+            for comp in COMPETITIONS:
+                comp_month = comp['date'].strftime('%Y-%m')
+                comp_weight = comp.get(lift_key if lift_key != 'bench_press' else 'bench', None)
+                if comp_weight and comp_month in monthly['month'].values:
+                    fig.add_vline(
+                        x=comp_month,
+                        line_dash="dash",
+                        line_color="#764ba2",
+                        annotation_text=f"🏆 {comp['name'].split()[0]}",
+                        annotation_position="top",
+                        annotation_font_size=10
+                    )
+                    # Add competition result as a point
+                    fig.add_trace(go.Scatter(
+                        x=[comp_month],
+                        y=[comp_weight],
+                        mode='markers',
+                        name=comp['name'],
+                        marker=dict(size=12, color='#764ba2', symbol='star'),
+                        hovertemplate=f"<b>{comp['name']}</b><br>Competition: {comp_weight}kg<extra></extra>"
+                    ))
 
             fig.update_layout(
                 height=300,
@@ -587,6 +630,272 @@ def create_insights_section():
             """, unsafe_allow_html=True)
 
 
+def create_competition_history():
+    """Create competition history section with meet results."""
+    st.markdown("### 🏆 Competition History")
+
+    if not COMPETITIONS:
+        st.info("No competition data available yet.")
+        return
+
+    # Competition cards
+    cols = st.columns(len(COMPETITIONS))
+
+    for i, comp in enumerate(COMPETITIONS):
+        with cols[i]:
+            place_text = f" • {comp['placement']}" if comp['placement'] else ""
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
+                <h4 style="margin: 0; color: white;">{comp['name']}</h4>
+                <p style="margin: 0.5rem 0; opacity: 0.9;">{comp['date'].strftime('%B %d, %Y')}{place_text}</p>
+                <hr style="border-color: rgba(255,255,255,0.3); margin: 0.8rem 0;">
+                <div style="display: flex; justify-content: space-around;">
+                    <div><strong>S</strong><br>{comp['squat']}kg</div>
+                    <div><strong>B</strong><br>{comp['bench']}kg</div>
+                    <div><strong>D</strong><br>{comp['deadlift']}kg</div>
+                </div>
+                <p style="margin-top: 0.8rem; font-size: 1.2rem;"><strong>{comp['total']}kg Total</strong></p>
+                <p style="margin: 0; opacity: 0.9;">{comp['attempts']} attempts</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if comp.get('notes'):
+                st.caption(f"📝 {comp['notes']}")
+
+    # Meet-to-meet progress
+    if len(COMPETITIONS) >= 2:
+        comp_context = get_competition_context()
+        progress = comp_context['meet_to_meet_progress']
+
+        st.markdown("#### Progress Between Meets")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            delta = progress['squat_gain']
+            st.metric("Squat", f"{COMPETITIONS[-1]['squat']}kg",
+                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
+
+        with col2:
+            delta = progress['bench_gain']
+            st.metric("Bench", f"{COMPETITIONS[-1]['bench']}kg",
+                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
+
+        with col3:
+            delta = progress['deadlift_gain']
+            st.metric("Deadlift", f"{COMPETITIONS[-1]['deadlift']}kg",
+                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
+
+        with col4:
+            delta = progress['total_gain']
+            st.metric("Total", f"{COMPETITIONS[-1]['total']}kg",
+                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
+
+        days = progress['time_between']
+        st.caption(f"🗓️ {days} days between meets ({days//30} months) • Attempts: {progress['attempts_improvement']}")
+
+
+def create_block_summaries():
+    """Create block-by-block training summaries."""
+    st.markdown("### 📦 Training Block Analysis")
+
+    st.markdown("""
+    *Your training is organized into blocks. Each block has a specific focus
+    and builds towards your goals. Here's how each block performed:*
+    """)
+
+    blocks = get_block_summaries()
+
+    # Filter to significant blocks (more than 2 weeks)
+    significant_blocks = [b for b in blocks if b['weeks'] >= 2]
+
+    if not significant_blocks:
+        st.info("Not enough block data to analyze.")
+        return
+
+    # Create expandable sections for each block
+    for block in significant_blocks[-6:]:  # Show last 6 significant blocks
+        start = block['start_date'].strftime('%b %Y')
+        end = block['end_date'].strftime('%b %Y')
+        date_range = f"{start}" if start == end else f"{start} - {end}"
+
+        with st.expander(f"**{block['name']}** ({date_range}) - {block['weeks']} weeks"):
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                # Block stats
+                st.markdown(f"""
+                **Type:** {block['type'].title()}
+
+                **Duration:** {block['weeks']} weeks
+
+                **Average RPE:** {block['avg_rpe']:.1f}/10
+
+                **Total Volume:** {block['tonnage']/1000:.1f} tons
+
+                **Interpretation:** {block['interpretation']}
+                """)
+
+            with col2:
+                # Lift peaks during this block
+                st.markdown("**Peak Weights:**")
+                for lift, weight in block['lift_peaks'].items():
+                    st.markdown(f"• {lift}: {format_weight(weight)}kg")
+
+
+def create_primary_secondary_analysis():
+    """Create analysis of primary vs secondary training days."""
+    st.markdown("### 📅 Primary vs Secondary Days")
+
+    st.markdown("""
+    *Your training splits into primary days (Day 1-2) with heavier competition lifts,
+    and secondary days (Day 3-4) focusing on variations and accessories.*
+    """)
+
+    analysis = get_primary_secondary_day_analysis()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Primary Days (Day 1-2)")
+        primary = analysis['primary']
+        st.markdown(f"""
+        - **Total Tonnage:** {primary['total_tonnage']/1000:.1f} tons
+        - **Main Lift Volume:** {primary['main_lift_volume']/1000:.1f} tons
+        - **Accessory Volume:** {primary['accessory_volume']/1000:.1f} tons
+        - **Average RPE:** {primary['avg_rpe']:.1f}/10
+        """)
+
+    with col2:
+        st.markdown("#### Secondary Days (Day 3-4)")
+        secondary = analysis['secondary']
+        st.markdown(f"""
+        - **Total Tonnage:** {secondary['total_tonnage']/1000:.1f} tons
+        - **Main Lift Volume:** {secondary['main_lift_volume']/1000:.1f} tons
+        - **Accessory Volume:** {secondary['accessory_volume']/1000:.1f} tons
+        - **Average RPE:** {secondary['avg_rpe']:.1f}/10
+        """)
+
+    # Per-lift breakdown
+    st.markdown("#### Per-Lift Comparison")
+
+    lift_data = []
+    for lift, data in analysis['by_lift'].items():
+        lift_data.append({
+            'Lift': lift,
+            'Primary Avg': f"{data['primary_avg_weight']:.1f}kg",
+            'Secondary Avg': f"{data['secondary_avg_weight']:.1f}kg",
+            'Primary Max': f"{data['primary_max']:.1f}kg",
+            'Secondary Max': f"{data['secondary_max']:.1f}kg",
+            'Primary RPE': f"{data['primary_rpe']:.1f}",
+            'Secondary RPE': f"{data['secondary_rpe']:.1f}"
+        })
+
+    if lift_data:
+        st.dataframe(pd.DataFrame(lift_data), hide_index=True, use_container_width=True)
+
+
+def create_goal_projections():
+    """Create goal projection section with 6mo, 12mo, and long-term goals."""
+    st.markdown("### 🎯 Goal Projections")
+
+    st.markdown("""
+    *Based on your historical progression rate, here are realistic goals.
+    Conservative estimates account for natural slowdown as you advance.*
+    """)
+
+    projections = calculate_goal_projections()
+
+    # Show progression rates
+    st.markdown("#### Your Progression Rate")
+    rate_cols = st.columns(3)
+    for i, (lift, rate) in enumerate(projections['progression_rates'].items()):
+        with rate_cols[i]:
+            st.metric(lift, f"{rate:.2f} kg/month", f"{rate*12:.1f} kg/year")
+
+    st.markdown("---")
+
+    # Projection tables
+    st.markdown("#### Projected PRs")
+
+    tabs = st.tabs(["6 Months", "12 Months", "Long-Term (2yr)"])
+
+    timeframes = ['6_month', '12_month', 'long_term']
+    timeframe_names = ['6 months', '12 months', '2 years']
+
+    for tab, timeframe, name in zip(tabs, timeframes, timeframe_names):
+        with tab:
+            if timeframe in projections and projections[timeframe]:
+                cols = st.columns(3)
+                for i, lift in enumerate(['Squat', 'Bench Press', 'Deadlift']):
+                    if lift in projections[timeframe]:
+                        data = projections[timeframe][lift]
+                        with cols[i]:
+                            current = data['current_pr']
+                            conservative = data['conservative']
+                            moderate = data['moderate']
+
+                            st.markdown(f"**{lift}**")
+                            st.markdown(f"Current: **{format_weight(current)}kg**")
+                            st.markdown(f"Conservative: **{format_weight(conservative)}kg** (+{format_weight(conservative-current)})")
+                            st.markdown(f"Moderate: **{format_weight(moderate)}kg** (+{format_weight(moderate-current)})")
+
+                # Calculate projected totals
+                if all(lift in projections[timeframe] for lift in ['Squat', 'Bench Press', 'Deadlift']):
+                    current_total = sum(projections[timeframe][l]['current_pr'] for l in ['Squat', 'Bench Press', 'Deadlift'])
+                    conservative_total = sum(projections[timeframe][l]['conservative'] for l in ['Squat', 'Bench Press', 'Deadlift'])
+                    moderate_total = sum(projections[timeframe][l]['moderate'] for l in ['Squat', 'Bench Press', 'Deadlift'])
+
+                    st.markdown(f"""
+                    ---
+                    **Projected Total in {name}:**
+                    - Conservative: **{format_weight(conservative_total)}kg** (+{format_weight(conservative_total-current_total)})
+                    - Moderate: **{format_weight(moderate_total)}kg** (+{format_weight(moderate_total-current_total)})
+                    """)
+
+
+def create_skip_analysis():
+    """Create detailed skip analysis including accessories."""
+    st.markdown("### ⏭️ Skipped Exercises Analysis")
+
+    skip_summary = get_skip_summary()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Main Lifts Skipped")
+        if skip_summary['main_lifts']:
+            for lift, count in skip_summary['main_lifts'].items():
+                pct = (count / 81) * 100
+                st.markdown(f"• **{lift}**: {count} times ({pct:.0f}% of weeks)")
+        else:
+            st.success("No main lifts skipped!")
+
+    with col2:
+        st.markdown("#### Accessories Skipped")
+        total_accessory = skip_summary['total_accessory_skips']
+        st.markdown(f"**Total accessory skips:** {total_accessory}")
+
+        if skip_summary['by_category']:
+            st.markdown("**By category:**")
+            for cat, count in sorted(skip_summary['by_category'].items(), key=lambda x: -x[1])[:5]:
+                st.markdown(f"• {cat.title()}: {count}")
+
+    # Interpretation
+    main_skip_rate = skip_summary['total_main_skips'] / (81 * 3) * 100  # 3 main lifts per week
+    st.markdown(f"""
+    <div class="interpretation">
+    <strong>Skip Analysis Summary</strong><br><br>
+
+    Main lift skip rate: **{main_skip_rate:.1f}%** - {"Excellent consistency!" if main_skip_rate < 10 else "Room for improvement" if main_skip_rate < 20 else "Consider addressing barriers to consistency"}<br><br>
+
+    Accessory skip rate is naturally higher as these are often adjusted based on fatigue and time constraints.
+    The key is maintaining consistency with main lifts, which you're doing {"well" if main_skip_rate < 15 else "adequately"}.
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def create_glossary():
     """Create a glossary of powerlifting terms."""
     with st.expander("📖 Glossary - What Do These Terms Mean?"):
@@ -608,6 +917,10 @@ def main():
         st.markdown("---")
         create_summary_interpretation(stats)
 
+        # Competition History - prominent position
+        st.markdown("---")
+        create_competition_history()
+
         st.markdown("---")
         st.markdown("## 📊 Your Lifts in Detail")
 
@@ -618,11 +931,24 @@ def main():
 
         create_lift_comparison(stats)
 
+        # Goal Projections
+        st.markdown("---")
+        create_goal_projections()
+
+        # Block Analysis
+        st.markdown("---")
+        create_block_summaries()
+
+        # Primary/Secondary Day Analysis
+        st.markdown("---")
+        create_primary_secondary_analysis()
+
         st.markdown("---")
         create_training_consistency(stats, freq_df)
 
+        # Detailed skip analysis (includes accessories)
         st.markdown("---")
-        create_skipped_sessions()
+        create_skip_analysis()
 
         st.markdown("---")
         create_accessory_analysis()

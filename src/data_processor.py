@@ -21,6 +21,44 @@ DATA_FILE = Path(__file__).parent.parent / "Aayush man .xlsx"
 # Week 1 started approximately April 2024
 TRAINING_START_DATE = datetime(2024, 4, 1)
 
+# =============================================================================
+# ATHLETE PROFILE
+# =============================================================================
+ATHLETE_PROFILE = {
+    'name': 'Aayush Man Singh',
+    'weight_class': 'U93kg',
+    'bodyweight': '90-91kg',
+    'federation': 'IPF',  # Assuming based on competition names
+}
+
+# =============================================================================
+# COMPETITION HISTORY
+# =============================================================================
+COMPETITIONS = [
+    {
+        'name': 'NYFC Classic 2024 Invitational',
+        'date': datetime(2024, 12, 9),
+        'squat': 220.0,
+        'bench': 122.5,
+        'deadlift': 250.0,
+        'total': 592.5,
+        'attempts': '8/9',
+        'placement': '4th',
+        'notes': 'Missed 130kg bench on 3rd attempt'
+    },
+    {
+        'name': 'OX Classic Summerslam',
+        'date': datetime(2025, 4, 27),
+        'squat': 220.0,
+        'bench': 130.0,
+        'deadlift': 255.0,
+        'total': 605.0,
+        'attempts': '9/9',
+        'placement': '',
+        'notes': 'Perfect meet! Made the bench that was missed at NYFC'
+    }
+]
+
 # Current PRs (updated based on latest data)
 CURRENT_PRS = {
     'Squat': 220,
@@ -28,11 +66,30 @@ CURRENT_PRS = {
     'Deadlift': 262.5
 }
 
-# Goal PRs for progress tracking
+# Goal PRs for progress tracking - short term (next meet)
 GOAL_PRS = {
     'Squat': 240,
     'Bench Press': 160,
     'Deadlift': 290
+}
+
+# Goal projections at different timeframes
+GOAL_PROJECTIONS = {
+    '6_month': {
+        'Squat': 230,
+        'Bench Press': 145,
+        'Deadlift': 275,
+    },
+    '12_month': {
+        'Squat': 245,
+        'Bench Press': 155,
+        'Deadlift': 290,
+    },
+    'long_term': {
+        'Squat': 260,
+        'Bench Press': 170,
+        'Deadlift': 310,
+    }
 }
 
 # Color scheme
@@ -788,6 +845,324 @@ def get_recent_training(weeks: int = 4) -> pd.DataFrame:
     df = load_training_data()
     max_week = df['week_order'].max()
     return df[df['week_order'] > max_week - weeks]
+
+
+def get_block_summaries() -> List[Dict]:
+    """
+    Get detailed summaries for each training block.
+
+    Returns list of block summaries with stats and interpretations.
+    """
+    df = load_training_data()
+
+    # Group by block
+    blocks = df.groupby(['block_name', 'block_type']).agg({
+        'week_order': ['min', 'max', 'nunique'],
+        'training_date': ['min', 'max'],
+        'tonnage': 'sum',
+        'sets': 'sum',
+        'rpe': 'mean',
+        'session_order': 'sum'
+    }).reset_index()
+
+    blocks.columns = ['block_name', 'block_type', 'start_week', 'end_week', 'weeks',
+                      'start_date', 'end_date', 'tonnage', 'total_sets', 'avg_rpe', 'sessions']
+
+    blocks = blocks.sort_values('start_week')
+
+    summaries = []
+    for _, block in blocks.iterrows():
+        # Get main lift peaks for this block
+        block_data = df[(df['block_name'] == block['block_name']) & (df['is_main_lift'] == True)]
+
+        lift_peaks = {}
+        for lift in ['Squat', 'Bench Press', 'Deadlift']:
+            lift_data = block_data[block_data['canonical_name'] == lift]
+            if not lift_data.empty:
+                lift_peaks[lift] = lift_data['actual_weight'].max()
+
+        # Generate interpretation
+        interpretation = _interpret_block(block, lift_peaks)
+
+        summaries.append({
+            'name': block['block_name'],
+            'type': block['block_type'],
+            'start_date': block['start_date'],
+            'end_date': block['end_date'],
+            'weeks': int(block['weeks']),
+            'tonnage': block['tonnage'],
+            'total_sets': int(block['total_sets']),
+            'avg_rpe': block['avg_rpe'],
+            'lift_peaks': lift_peaks,
+            'interpretation': interpretation
+        })
+
+    return summaries
+
+
+def _interpret_block(block: pd.Series, lift_peaks: Dict) -> str:
+    """Generate interpretation text for a training block."""
+    block_type = block['block_type']
+    avg_rpe = block['avg_rpe']
+
+    if block_type == 'build':
+        if avg_rpe < 7:
+            return "Volume-focused building phase. Emphasis on technique and accumulating work capacity."
+        else:
+            return "Intensity-focused building phase. Pushing weights while building strength."
+    elif block_type == 'prep':
+        return "Meet preparation phase. Peaking for competition with reduced volume and higher intensity."
+    elif block_type == 'competition':
+        return "Competition phase. Testing maximal strength on the platform."
+    elif block_type == 'intro':
+        return "Introduction/transition phase. Establishing baseline and preparing for upcoming training."
+    else:
+        return "General training phase with mixed focus."
+
+
+def get_primary_secondary_day_analysis() -> Dict:
+    """
+    Analyze primary (Day 1-2) vs secondary (Day 3-4) training days.
+
+    Primary days typically have main competition lifts with heavier weights.
+    Secondary days focus on variations, accessories, and volume work.
+    """
+    df = load_training_data()
+
+    # Classify days: 1-2 = primary, 3-4 = secondary
+    df['day_type'] = df['session_order'].apply(
+        lambda x: 'primary' if x <= 2 else 'secondary'
+    )
+
+    # Overall split
+    primary_data = df[df['day_type'] == 'primary']
+    secondary_data = df[df['day_type'] == 'secondary']
+
+    # Main lifts analysis by day type
+    main_lifts = df[df['is_main_lift'] == True]
+
+    analysis = {
+        'primary': {
+            'sessions': primary_data['session_order'].nunique() if not primary_data.empty else 0,
+            'total_tonnage': primary_data['tonnage'].sum(),
+            'avg_rpe': primary_data['rpe'].mean() if not primary_data.empty else 0,
+            'main_lift_volume': primary_data[primary_data['is_main_lift'] == True]['tonnage'].sum(),
+            'accessory_volume': primary_data[primary_data['is_main_lift'] == False]['tonnage'].sum(),
+        },
+        'secondary': {
+            'sessions': secondary_data['session_order'].nunique() if not secondary_data.empty else 0,
+            'total_tonnage': secondary_data['tonnage'].sum(),
+            'avg_rpe': secondary_data['rpe'].mean() if not secondary_data.empty else 0,
+            'main_lift_volume': secondary_data[secondary_data['is_main_lift'] == True]['tonnage'].sum(),
+            'accessory_volume': secondary_data[secondary_data['is_main_lift'] == False]['tonnage'].sum(),
+        },
+        'by_lift': {}
+    }
+
+    # Per-lift analysis
+    for lift in ['Squat', 'Bench Press', 'Deadlift']:
+        lift_data = main_lifts[main_lifts['canonical_name'] == lift]
+
+        primary_lift = lift_data[lift_data['day_type'] == 'primary']
+        secondary_lift = lift_data[lift_data['day_type'] == 'secondary']
+
+        analysis['by_lift'][lift] = {
+            'primary_avg_weight': primary_lift['actual_weight'].mean() if not primary_lift.empty else 0,
+            'secondary_avg_weight': secondary_lift['actual_weight'].mean() if not secondary_lift.empty else 0,
+            'primary_max': primary_lift['actual_weight'].max() if not primary_lift.empty else 0,
+            'secondary_max': secondary_lift['actual_weight'].max() if not secondary_lift.empty else 0,
+            'primary_rpe': primary_lift['rpe'].mean() if not primary_lift.empty else 0,
+            'secondary_rpe': secondary_lift['rpe'].mean() if not secondary_lift.empty else 0,
+        }
+
+    return analysis
+
+
+def get_all_skipped_exercises() -> pd.DataFrame:
+    """
+    Get all skipped exercises including accessories.
+
+    Returns DataFrame with skipped exercises (both main lifts and accessories).
+    """
+    xl = pd.ExcelFile(DATA_FILE)
+    skipped_exercises = []
+    total_sheets = len(xl.sheet_names)
+    is_latest_week = True
+
+    for sheet_idx, sheet_name in enumerate(xl.sheet_names):
+        df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
+        week_order = total_sheets - sheet_idx
+        training_date = week_to_date(week_order)
+
+        for i, row in df.iterrows():
+            cell0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
+
+            # Skip headers and warmups
+            if cell0.lower() in ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']:
+                continue
+            if 'warm up' in cell0.lower() or cell0.lower() == 'movement':
+                continue
+            if 'foam roll' in cell0.lower() or 'cardio' in cell0.lower():
+                continue
+
+            canonical, category, is_main = canonicalize_exercise(cell0)
+            if canonical is None:
+                continue
+
+            try:
+                prescribed = parse_weight(row.iloc[2]) if len(row) > 2 else None
+                actual = parse_weight(row.iloc[3]) if len(row) > 3 else None
+            except:
+                continue
+
+            # Track if exercise was prescribed but not done
+            if prescribed is not None and actual is None and not is_latest_week:
+                skipped_exercises.append({
+                    'week': sheet_name.strip(),
+                    'week_order': week_order,
+                    'training_date': training_date,
+                    'exercise': canonical,
+                    'category': category,
+                    'is_main_lift': is_main,
+                    'prescribed_weight': prescribed
+                })
+
+        is_latest_week = False
+
+    return pd.DataFrame(skipped_exercises) if skipped_exercises else pd.DataFrame()
+
+
+def get_skip_summary() -> Dict:
+    """Get summary of skipped exercises by type."""
+    skipped = get_all_skipped_exercises()
+
+    if skipped.empty:
+        return {
+            'main_lifts': {},
+            'accessories': {},
+            'total_main_skips': 0,
+            'total_accessory_skips': 0
+        }
+
+    main_skips = skipped[skipped['is_main_lift'] == True]
+    accessory_skips = skipped[skipped['is_main_lift'] == False]
+
+    return {
+        'main_lifts': main_skips.groupby('exercise').size().to_dict() if not main_skips.empty else {},
+        'accessories': accessory_skips.groupby('exercise').size().to_dict() if not accessory_skips.empty else {},
+        'total_main_skips': len(main_skips),
+        'total_accessory_skips': len(accessory_skips),
+        'by_category': accessory_skips.groupby('category').size().to_dict() if not accessory_skips.empty else {}
+    }
+
+
+def calculate_goal_projections() -> Dict:
+    """
+    Calculate realistic goal projections based on current progression rate.
+
+    Returns projections for 6 months, 12 months, and long-term.
+    """
+    stats = get_summary_stats()
+
+    # Calculate progression rate per month for each lift
+    projections = {
+        '6_month': {},
+        '12_month': {},
+        'long_term': {},
+        'progression_rates': {}
+    }
+
+    for lift in ['Squat', 'Bench Press', 'Deadlift']:
+        lift_data = get_lift_specific_data(lift)
+        if not lift_data:
+            continue
+
+        pr = lift_data['pr']
+        first_avg = lift_data['first_10_avg']
+        last_avg = lift_data['last_10_avg']
+        weeks = lift_data['weeks_trained']
+
+        if first_avg and last_avg and weeks > 0:
+            # Calculate monthly progression rate
+            total_gain = last_avg - first_avg
+            months = weeks / 4.33  # Average weeks per month
+            monthly_rate = total_gain / months if months > 0 else 0
+
+            projections['progression_rates'][lift] = monthly_rate
+
+            # Project from current PR
+            # Conservative: 70% of historical rate (progress slows as you advance)
+            # Moderate: 85% of historical rate
+            # Aggressive: 100% of historical rate
+
+            conservative_rate = monthly_rate * 0.7
+            moderate_rate = monthly_rate * 0.85
+
+            projections['6_month'][lift] = {
+                'conservative': pr + (conservative_rate * 6),
+                'moderate': pr + (moderate_rate * 6),
+                'current_pr': pr
+            }
+
+            projections['12_month'][lift] = {
+                'conservative': pr + (conservative_rate * 12),
+                'moderate': pr + (moderate_rate * 12),
+                'current_pr': pr
+            }
+
+            # Long-term (2 years) - assume further slowdown
+            long_term_rate = monthly_rate * 0.5
+            projections['long_term'][lift] = {
+                'conservative': pr + (long_term_rate * 24),
+                'moderate': pr + (monthly_rate * 0.6 * 24),
+                'current_pr': pr
+            }
+
+    return projections
+
+
+def get_competition_context() -> Dict:
+    """
+    Get context around competition dates for chart markers.
+
+    Returns competition info with week_order for chart plotting.
+    """
+    competitions_with_context = []
+
+    for comp in COMPETITIONS:
+        # Find the closest week_order to the competition date
+        comp_date = comp['date']
+        days_since_start = (comp_date - TRAINING_START_DATE).days
+        week_order = max(1, days_since_start // 7 + 1)
+
+        competitions_with_context.append({
+            **comp,
+            'week_order': week_order,
+            'month_year': format_date(comp_date)
+        })
+
+    return {
+        'competitions': competitions_with_context,
+        'meet_to_meet_progress': _calculate_meet_progress()
+    }
+
+
+def _calculate_meet_progress() -> Dict:
+    """Calculate progress between meets."""
+    if len(COMPETITIONS) < 2:
+        return {}
+
+    first = COMPETITIONS[0]
+    last = COMPETITIONS[-1]
+
+    return {
+        'squat_gain': last['squat'] - first['squat'],
+        'bench_gain': last['bench'] - first['bench'],
+        'deadlift_gain': last['deadlift'] - first['deadlift'],
+        'total_gain': last['total'] - first['total'],
+        'time_between': (last['date'] - first['date']).days,
+        'attempts_improvement': f"{first['attempts']} → {last['attempts']}"
+    }
 
 
 if __name__ == '__main__':
