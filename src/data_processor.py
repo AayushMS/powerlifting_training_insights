@@ -17,9 +17,22 @@ import re
 # Excel file path
 DATA_FILE = Path(__file__).parent.parent / "Aayush man .xlsx"
 
-# Training start date (estimated: 81 weeks before Dec 2025)
-# Week 1 started approximately April 2024
-TRAINING_START_DATE = datetime(2024, 4, 1)
+# Training timeline:
+# - Start: March 3rd week 2024 (~March 18)
+# - Latest week (week 81) starts Dec 28, 2025
+# - Total calendar span: ~93 weeks
+# - Training breaks: 9 weeks (June 4wk + Oct 2wk + May 3wk) + ~3 weeks scattered misses
+TRAINING_START_DATE = datetime(2024, 3, 18)
+
+# Training breaks (weeks with no training)
+# Total: ~13 weeks to account for March 18 start to Dec 28 end with 81 training weeks
+TRAINING_BREAKS = [
+    {'start': datetime(2024, 6, 1), 'duration_weeks': 4, 'reason': 'June 2024 break'},
+    {'start': datetime(2024, 10, 1), 'duration_weeks': 2, 'reason': 'October 2024 break'},
+    {'start': datetime(2024, 12, 9), 'duration_weeks': 2, 'reason': 'Post-NYFC Classic break'},
+    {'start': datetime(2025, 5, 1), 'duration_weeks': 3, 'reason': 'May 2025 break'},
+    {'start': datetime(2025, 8, 1), 'duration_weeks': 2, 'reason': 'Scattered misses'},
+]
 
 # =============================================================================
 # ATHLETE PROFILE
@@ -54,7 +67,7 @@ COMPETITIONS = [
         'deadlift': 255.0,
         'total': 605.0,
         'attempts': '9/9',
-        'placement': '',
+        'placement': '3rd',
         'notes': 'Perfect meet! Made the bench that was missed at NYFC'
     }
 ]
@@ -66,31 +79,13 @@ CURRENT_PRS = {
     'Deadlift': 262.5
 }
 
-# Goal PRs for progress tracking - short term (next meet)
+# Goal PRs for 2026 - user-defined targets
 GOAL_PRS = {
-    'Squat': 240,
-    'Bench Press': 160,
-    'Deadlift': 290
+    'Squat': 240,       # 2026 target
+    'Bench Press': 150, # 2026 target
+    'Deadlift': 280     # 2026 target
 }
-
-# Goal projections at different timeframes
-GOAL_PROJECTIONS = {
-    '6_month': {
-        'Squat': 230,
-        'Bench Press': 145,
-        'Deadlift': 275,
-    },
-    '12_month': {
-        'Squat': 245,
-        'Bench Press': 155,
-        'Deadlift': 290,
-    },
-    'long_term': {
-        'Squat': 260,
-        'Bench Press': 170,
-        'Deadlift': 310,
-    }
-}
+# Total goal: 670kg
 
 # Color scheme
 COLORS = {
@@ -111,8 +106,26 @@ KNOWN_ANOMALIES = {
 
 
 def week_to_date(week_order: int) -> datetime:
-    """Convert week order to approximate date."""
-    return TRAINING_START_DATE + timedelta(weeks=week_order - 1)
+    """
+    Convert week order to approximate date, accounting for training breaks.
+
+    The week_order represents consecutive training weeks (1 to 81).
+    We need to add break weeks when the date crosses break periods.
+    """
+    # Start with the base calculation
+    base_date = TRAINING_START_DATE + timedelta(weeks=week_order - 1)
+
+    # Add break weeks for any breaks that occurred before this training week
+    extra_weeks = 0
+    for brk in TRAINING_BREAKS:
+        break_start = brk['start']
+        break_weeks = brk['duration_weeks']
+
+        # If our calculated date is after the break start, add the break duration
+        if base_date >= break_start:
+            extra_weeks += break_weeks
+
+    return TRAINING_START_DATE + timedelta(weeks=week_order - 1 + extra_weeks)
 
 
 def format_date(dt: datetime) -> str:
@@ -872,17 +885,39 @@ def get_block_summaries() -> List[Dict]:
 
     summaries = []
     for _, block in blocks.iterrows():
-        # Get main lift peaks for this block
+        # Get main lift data for this block
         block_data = df[(df['block_name'] == block['block_name']) & (df['is_main_lift'] == True)]
 
         lift_peaks = {}
+        lift_details = {}
+
         for lift in ['Squat', 'Bench Press', 'Deadlift']:
-            lift_data = block_data[block_data['canonical_name'] == lift]
+            lift_data = block_data[block_data['canonical_name'] == lift].sort_values('week_order')
             if not lift_data.empty:
                 lift_peaks[lift] = lift_data['actual_weight'].max()
 
+                # Get start and end weights for this block
+                first_week_data = lift_data.head(3)  # First few entries
+                last_week_data = lift_data.tail(3)   # Last few entries
+
+                start_weight = first_week_data['actual_weight'].max()
+                end_weight = last_week_data['actual_weight'].max()
+                change = end_weight - start_weight
+                avg_rpe = lift_data['rpe'].mean()
+                total_sets = lift_data['sets'].sum()
+
+                lift_details[lift] = {
+                    'start_weight': start_weight,
+                    'end_weight': end_weight,
+                    'change': change,
+                    'peak': lift_data['actual_weight'].max(),
+                    'avg_rpe': avg_rpe if not pd.isna(avg_rpe) else 0,
+                    'total_sets': int(total_sets),
+                    'trend': 'up' if change > 0 else ('down' if change < 0 else 'stable')
+                }
+
         # Generate interpretation
-        interpretation = _interpret_block(block, lift_peaks)
+        interpretation = _interpret_block(block, lift_peaks, lift_details)
 
         summaries.append({
             'name': block['block_name'],
@@ -894,30 +929,63 @@ def get_block_summaries() -> List[Dict]:
             'total_sets': int(block['total_sets']),
             'avg_rpe': block['avg_rpe'],
             'lift_peaks': lift_peaks,
+            'lift_details': lift_details,
             'interpretation': interpretation
         })
 
     return summaries
 
 
-def _interpret_block(block: pd.Series, lift_peaks: Dict) -> str:
-    """Generate interpretation text for a training block."""
+def _interpret_block(block: pd.Series, lift_peaks: Dict, lift_details: Dict = None) -> str:
+    """Generate detailed interpretation text for a training block with per-lift analysis."""
     block_type = block['block_type']
     avg_rpe = block['avg_rpe']
 
+    # Base interpretation
     if block_type == 'build':
         if avg_rpe < 7:
-            return "Volume-focused building phase. Emphasis on technique and accumulating work capacity."
+            base = "Volume-focused building phase. Emphasis on technique and accumulating work capacity."
         else:
-            return "Intensity-focused building phase. Pushing weights while building strength."
+            base = "Intensity-focused building phase. Pushing weights while building strength."
     elif block_type == 'prep':
-        return "Meet preparation phase. Peaking for competition with reduced volume and higher intensity."
+        base = "Meet preparation phase. Peaking for competition with reduced volume and higher intensity."
     elif block_type == 'competition':
-        return "Competition phase. Testing maximal strength on the platform."
+        base = "Competition phase. Testing maximal strength on the platform."
     elif block_type == 'intro':
-        return "Introduction/transition phase. Establishing baseline and preparing for upcoming training."
+        base = "Introduction/transition phase. Establishing baseline and preparing for upcoming training."
     else:
-        return "General training phase with mixed focus."
+        base = "General training phase with mixed focus."
+
+    # Add per-lift progression details
+    if lift_details:
+        lift_summaries = []
+        for lift in ['Squat', 'Bench Press', 'Deadlift']:
+            if lift in lift_details:
+                details = lift_details[lift]
+                start = details['start_weight']
+                end = details['end_weight']
+                change = details['change']
+                trend = details['trend']
+                peak = details['peak']
+
+                lift_name = lift.replace('Bench Press', 'Bench')
+
+                if trend == 'up':
+                    direction = f"+{change:.1f}kg"
+                    emoji = "📈"
+                elif trend == 'down':
+                    direction = f"{change:.1f}kg"
+                    emoji = "📉"
+                else:
+                    direction = "maintained"
+                    emoji = "➡️"
+
+                lift_summaries.append(f"{emoji} {lift_name}: {start:.1f}→{end:.1f}kg ({direction}), peaked at {peak:.1f}kg")
+
+        if lift_summaries:
+            return base + "\n\n" + "\n".join(lift_summaries)
+
+    return base
 
 
 def get_primary_secondary_day_analysis() -> Dict:

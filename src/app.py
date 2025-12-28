@@ -40,7 +40,6 @@ from data_processor import (
     GOAL_PRS,
     ATHLETE_PROFILE,
     COMPETITIONS,
-    GOAL_PROJECTIONS
 )
 
 from interpretations import (
@@ -248,7 +247,7 @@ def create_hero_section(stats):
             """, unsafe_allow_html=True)
 
             st.progress(progress / 100)
-            st.caption(f"{goal_info['emoji']} {progress:.0f}% to {goal}kg goal")
+            st.caption(f"{goal_info['emoji']} {progress:.0f}% to {format_weight(goal)}kg (1yr)")
 
     with col4:
         total = stats['total_pr']
@@ -269,7 +268,7 @@ def create_hero_section(stats):
         """, unsafe_allow_html=True)
 
         st.progress(progress / 100)
-        st.caption(f"🎯 {progress:.0f}% to {total_goal}kg goal")
+        st.caption(f"🎯 {progress:.0f}% to {format_weight(total_goal)}kg (1yr)")
 
 
 def create_summary_interpretation(stats):
@@ -327,13 +326,19 @@ def create_lift_section(lift: str, color: str):
         if not monthly.empty:
             fig = go.Figure()
 
+            # Create text labels for data points (show every value)
+            text_labels = [f"{w:.0f}" if w == int(w) else f"{w:.1f}" for w in monthly['actual_weight']]
+
             fig.add_trace(go.Scatter(
                 x=monthly['month'],
                 y=monthly['actual_weight'],
-                mode='lines+markers',
+                mode='lines+markers+text',
                 name='Monthly Best',
                 line=dict(color=color, width=3),
-                marker=dict(size=8),
+                marker=dict(size=10),
+                text=text_labels,
+                textposition='top center',
+                textfont=dict(size=10, color=color),
                 hovertemplate="<b>%{x}</b><br>Best: %{y:.1f} kg<extra></extra>"
             ))
 
@@ -378,14 +383,15 @@ def create_lift_section(lift: str, color: str):
                         hovertemplate=f"<b>{comp['name']}</b><br>Competition: {comp_weight}kg<extra></extra>"
                     ))
 
+            # Increased height for better readability with labels
             fig.update_layout(
-                height=300,
+                height=400,
                 xaxis_title="Month",
                 yaxis_title="Weight (kg)",
                 showlegend=False,
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=50, r=20, t=30, b=50),
+                margin=dict(l=50, r=20, t=40, b=50),
                 xaxis=dict(tickangle=-45)
             )
 
@@ -483,10 +489,16 @@ def create_training_consistency(stats, freq_df):
 
         fig = go.Figure()
 
+        # Create text labels for bar values
+        bar_labels = [str(int(w)) for w in monthly['week_order']]
+
         fig.add_trace(go.Bar(
             x=monthly['month_label'],
             y=monthly['week_order'],
             marker_color='#667eea',
+            text=bar_labels,
+            textposition='outside',
+            textfont=dict(size=10),
             hovertemplate="<b>%{x}</b><br>Weeks trained: %{y}<extra></extra>"
         ))
 
@@ -499,12 +511,12 @@ def create_training_consistency(stats, freq_df):
         )
 
         fig.update_layout(
-            height=250,
+            height=300,
             xaxis_title="Month",
             yaxis_title="Weeks Trained",
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=50, r=20, t=20, b=50),
+            margin=dict(l=50, r=20, t=30, b=50),
             xaxis=dict(tickangle=-45)
         )
 
@@ -716,24 +728,51 @@ def create_block_summaries():
         date_range = f"{start}" if start == end else f"{start} - {end}"
 
         with st.expander(f"**{block['name']}** ({date_range}) - {block['weeks']} weeks"):
-            col1, col2 = st.columns([2, 1])
+            # Block overview
+            st.markdown(f"**Type:** {block['type'].title()} | **Duration:** {block['weeks']} weeks | **Avg RPE:** {block['avg_rpe']:.1f}/10 | **Volume:** {block['tonnage']/1000:.1f} tons")
 
-            with col1:
-                # Block stats
-                st.markdown(f"""
-                **Type:** {block['type'].title()}
+            # Interpretation (base part only, without lift details)
+            interpretation_lines = block['interpretation'].split('\n\n')
+            st.markdown(f"*{interpretation_lines[0]}*")
 
-                **Duration:** {block['weeks']} weeks
+            st.markdown("---")
 
-                **Average RPE:** {block['avg_rpe']:.1f}/10
+            # Detailed lift progression
+            st.markdown("**Per-Lift Progression:**")
+            lift_details = block.get('lift_details', {})
 
-                **Total Volume:** {block['tonnage']/1000:.1f} tons
+            if lift_details:
+                cols = st.columns(3)
+                for i, (lift, details) in enumerate(lift_details.items()):
+                    with cols[i]:
+                        start_w = details['start_weight']
+                        end_w = details['end_weight']
+                        change = details['change']
+                        peak = details['peak']
+                        trend = details['trend']
 
-                **Interpretation:** {block['interpretation']}
-                """)
+                        lift_name = lift.replace('Bench Press', 'Bench')
 
-            with col2:
-                # Lift peaks during this block
+                        if trend == 'up':
+                            trend_emoji = "📈"
+                            trend_color = "green"
+                            change_str = f"+{change:.1f}kg"
+                        elif trend == 'down':
+                            trend_emoji = "📉"
+                            trend_color = "red"
+                            change_str = f"{change:.1f}kg"
+                        else:
+                            trend_emoji = "➡️"
+                            trend_color = "gray"
+                            change_str = "maintained"
+
+                        st.markdown(f"**{trend_emoji} {lift_name}**")
+                        st.markdown(f"Start: **{format_weight(start_w)}kg**")
+                        st.markdown(f"End: **{format_weight(end_w)}kg**")
+                        st.markdown(f"Change: **{change_str}**")
+                        st.markdown(f"Peak: **{format_weight(peak)}kg**")
+            else:
+                # Fallback to old peak weights display
                 st.markdown("**Peak Weights:**")
                 for lift, weight in block['lift_peaks'].items():
                     st.markdown(f"• {lift}: {format_weight(weight)}kg")
