@@ -6,6 +6,12 @@ A beautiful, data-driven dashboard for analyzing powerlifting training progress.
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=for-the-badge&logo=plotly&logoColor=white)
 
+## Deployment
+
+- **Dashboard:** Streamlit Cloud
+- **Database:** Supabase PostgreSQL
+- **Repo:** https://github.com/AayushMS/powerlifting_training_insights
+
 ## Features
 
 - **81 Weeks of Training Data** - Comprehensive analysis of long-term progression
