@@ -8,7 +8,7 @@ A beautiful, data-driven dashboard for analyzing powerlifting training progress.
 
 ## Deployment
 
-- **Dashboard:** Streamlit Cloud
+- **Dashboard:** https://aayushms-powerlifting.streamlit.app/
 - **Database:** Supabase PostgreSQL
 - **Repo:** https://github.com/AayushMS/powerlifting_training_insights
 
