@@ -39,9 +39,9 @@ TRAINING_BREAKS = [
 # =============================================================================
 ATHLETE_PROFILE = {
     'name': 'Aayush Man Singh',
-    'weight_class': 'U93kg',
-    'bodyweight': '90-91kg',
-    'federation': 'IPF',  # Assuming based on competition names
+    'weight_class': 'U93 → cutting to U90 (2026)',
+    'bodyweight': '~91–93kg',
+    'federation': 'WRPF / IPF-style',
 }
 
 # =============================================================================
