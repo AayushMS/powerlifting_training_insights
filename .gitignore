@@ -41,14 +41,12 @@ env/
 # Jupyter Notebook
 .ipynb_checkpoints/
 
-# Data files (keep training data for deployment)
-training_log.xlsx
-# Include new training data: Aayush man .xlsx
+# Data files
+# Note: "Aayush man .xlsx" IS committed — it's the dashboard's data source.
 
-# Database
+# Databases (legacy)
 *.db
 *.sqlite3
-pgdata/
 
 # Logs
 *.log
@@ -65,5 +63,5 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
-# Docker volumes (if created locally)
-postgres_data/
+# Private data (never commit/deploy — personal chat logs & analysis)
+chat_data/

@@ -17,11 +17,11 @@ import re
 # Excel file path
 DATA_FILE = Path(__file__).parent.parent / "Aayush man .xlsx"
 
-# Training timeline:
-# - Start: March 3rd week 2024 (~March 18)
-# - Latest week (week 81) starts Dec 28, 2025
-# - Total calendar span: ~93 weeks
-# - Training breaks: 9 weeks (June 4wk + Oct 2wk + May 3wk) + ~3 weeks scattered misses
+# Training timeline (dates are approximate — the sheet has no explicit dates):
+# - Start: 3rd week of March 2024 (~March 18)
+# - ~105 training weeks through mid-2026
+# - Training breaks below are added on top of consecutive training weeks so the
+#   newest week lands near the present day.
 TRAINING_START_DATE = datetime(2024, 3, 18)
 
 # Training breaks (weeks with no training)
@@ -72,11 +72,11 @@ COMPETITIONS = [
     }
 ]
 
-# Current PRs (updated based on latest data)
+# Current PRs (informational only — get_current_prs() derives these from the data)
 CURRENT_PRS = {
     'Squat': 220,
     'Bench Press': 135,
-    'Deadlift': 262.5
+    'Deadlift': 275
 }
 
 # Goal PRs for 2026 - user-defined targets
@@ -226,34 +226,48 @@ def parse_weight(val, prescribed=None, sheet_name=None, exercise=None) -> Option
         return None
 
 
+def _valid_rpe(rpe: Optional[float]) -> Optional[float]:
+    """Return the RPE only if it is within the sane 1-10 range."""
+    if rpe is None:
+        return None
+    return rpe if 1 <= rpe <= 10 else None
+
+
 def parse_rpe(val) -> Optional[float]:
-    """Parse RPE value, handling Excel date conversion bugs."""
+    """
+    Parse RPE value, handling Google Sheets' date-conversion quirk.
+
+    Athletes log RPE ranges like "8/9" which Google Sheets silently
+    reinterprets as a date (e.g. Aug 9). We recover the intended RPE from
+    the month/day (8/9 -> 8.5). Every path is clamped to the valid 1-10
+    range so stray dates/typos can never pollute the average.
+    """
     if pd.isna(val):
         return None
 
+    # Datetime cells: "8/9" -> Aug 9 -> RPE 8.5, "9/10" -> Sep 10 -> 9.5
+    if isinstance(val, (datetime, pd.Timestamp)):
+        return _valid_rpe((val.month + val.day) / 2)
+
     val_str = str(val).strip()
 
-    # Handle Excel date format (e.g., "2025-06-07 00:00:00" should be 6.7 RPE)
-    if '2025' in val_str or '2024' in val_str:
-        match = re.search(r'-(\d+)-(\d+)', val_str)
-        if match:
-            month = int(match.group(1))
-            day = int(match.group(2))
-            # Interpret as RPE like 6/7 -> 6.5 or 7/8 -> 7.5
-            return (month + day) / 2 if day <= 10 else month
+    # Date-as-string fallback for any year (e.g. "2026-08-09 00:00:00")
+    date_match = re.search(r'(?:19|20)\d{2}-(\d{1,2})-(\d{1,2})', val_str)
+    if date_match:
+        month = int(date_match.group(1))
+        day = int(date_match.group(2))
+        return _valid_rpe((month + day) / 2)
 
     # Handle range like "7.5-8" or "8-9"
-    if '-' in val_str:
+    if '-' in val_str and not val_str.startswith('-'):
         parts = val_str.split('-')
         try:
-            return (float(parts[0]) + float(parts[1])) / 2
+            return _valid_rpe((float(parts[0]) + float(parts[1])) / 2)
         except (ValueError, IndexError):
             pass
 
     try:
-        rpe = float(val_str)
-        if 1 <= rpe <= 10:
-            return rpe
+        return _valid_rpe(float(val_str))
     except ValueError:
         pass
 

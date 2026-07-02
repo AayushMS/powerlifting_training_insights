@@ -25,25 +25,28 @@
 ## Current Training PRs (from data)
 - **Squat:** 220kg
 - **Bench Press:** 135kg
-- **Deadlift:** 262.5kg
-- **Total:** 617.5kg
+- **Deadlift:** 275kg
+- **Total:** 630kg
 
 ## Data Source
-- **File:** `Aayush man .xlsx`
-- **Duration:** 81 weeks (April 2024 - October 2025)
-- **Sessions:** ~325 total sessions
-- **Frequency:** ~4 sessions per week
+- **File:** `Aayush man .xlsx` (exported from the training-log Google Sheet)
+- **Duration:** 105 training weeks (~March 2024 - mid 2026)
+- **Sessions:** ~387 total sessions
+- **Frequency:** ~3.7 sessions per week
+- **Total volume:** ~186 tons (Squat 71 / Bench 38 / Deadlift 76)
 
 ## Key Insights
 
 ### Lift Ratios
-- **Bench/Squat:** 61.4% (Target: 75-80%) - Bench is the biggest opportunity
-- **Deadlift/Squat:** 119.3% (Target: 110-125%) - Well balanced
+- **Bench/Squat:** 61.4% (Target: 65-80%) - Bench is the biggest opportunity
+- **Deadlift/Squat:** 125.0% (Target: 110-125%) - At the top of the balanced range
 
 ### Progression Rates
-- **Squat:** 1.51 kg/month (18.1 kg/year)
-- **Bench Press:** 0.98 kg/month (11.7 kg/year)
-- **Deadlift:** 1.43 kg/month (17.2 kg/year)
+Computed from first-10-week vs last-10-week average working weights (the dashboard's
+conservative basis; recent light "Reset"/deload weeks pull the recent average down):
+- **Squat:** ~0.4 kg/month
+- **Bench Press:** ~0.6 kg/month
+- **Deadlift:** ~0.3 kg/month
 
 ### Training Structure
 - **Primary Days (Day 1-2):** Competition lifts, heavier weights, 961 tons total
@@ -53,3 +56,15 @@
 1. **177.5kg Bench Anomaly:** Was a typo for 117.5kg - corrected in code
 2. **Latest Week:** Marked as "in progress" (not skipped)
 3. **Skipped Exercises:** Tracked separately for main lifts vs accessories
+4. **RPE-as-date (2026):** Google Sheets converts RPE like "8/9" into dates. The 2026
+   dates were producing garbage RPE (~1017); `parse_rpe` now handles datetime cells and
+   clamps every value to 1-10. See KNOWN_ISSUES_AND_FIXES.md.
+5. **Empty scratch tabs:** `Sheet7`-`Sheet10` in the source Google Sheet are dropped
+   during export so they don't count as training weeks.
+
+## Missing Weeks in Source Sheet (not recoverable from files)
+A few weeks were never duplicated in the Google Sheet (holes between existing weeks):
+**build up 2/5, build week 4/5, build 4/5**. These predate the earliest repo snapshot
+(Dec 2025) and cannot be recovered from files or the Drive API — only via Google Sheets'
+built-in Version History (if still within its retention window). Several block tails
+(e.g. B6 3-5/5, Prep 5-8/8) appear cut short and may be intentional.

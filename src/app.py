@@ -402,7 +402,7 @@ def create_lift_section(lift: str, color: str):
                 xaxis=dict(tickangle=-45)
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     with col2:
         # Key stats
@@ -527,11 +527,15 @@ def create_training_consistency(stats, freq_df):
             xaxis=dict(tickangle=-45)
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     with col2:
-        # Consistency stats
-        consistency_text = interpret_consistency(stats['total_weeks'], 81)
+        # Consistency stats: weeks trained vs. calendar weeks in the span
+        calendar_weeks = max(
+            stats['total_weeks'],
+            int((stats['end_date'] - stats['start_date']).days / 7) + 1
+        )
+        consistency_text = interpret_consistency(stats['total_weeks'], calendar_weeks)
         freq_text = interpret_sessions_per_week(stats['avg_sessions_per_week'])
 
         st.markdown(f"""
@@ -543,7 +547,7 @@ def create_training_consistency(stats, freq_df):
         """, unsafe_allow_html=True)
 
 
-def create_skipped_sessions():
+def create_skipped_sessions(total_weeks: int):
     """Show skipped sessions in a helpful way."""
     skipped = get_skipped_exercises()
 
@@ -566,7 +570,7 @@ def create_skipped_sessions():
     for col, lift in zip([col1, col2, col3], ['Squat', 'Bench Press', 'Deadlift']):
         with col:
             count = skip_counts.get(lift, 0)
-            interpretation = interpret_skipped_lift(lift, count, 81)
+            interpretation = interpret_skipped_lift(lift, count, total_weeks)
             st.markdown(f"""
             **{lift}**: {count} skipped
 
@@ -834,7 +838,7 @@ def create_primary_secondary_analysis():
         })
 
     if lift_data:
-        st.dataframe(pd.DataFrame(lift_data), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(lift_data), hide_index=True, width='stretch')
 
 
 def create_goal_projections():
@@ -896,7 +900,7 @@ def create_goal_projections():
                     """)
 
 
-def create_skip_analysis():
+def create_skip_analysis(total_weeks: int):
     """Create detailed skip analysis including accessories."""
     st.markdown("### ⏭️ Skipped Exercises Analysis")
 
@@ -908,7 +912,7 @@ def create_skip_analysis():
         st.markdown("#### Main Lifts Skipped")
         if skip_summary['main_lifts']:
             for lift, count in skip_summary['main_lifts'].items():
-                pct = (count / 81) * 100
+                pct = (count / total_weeks) * 100
                 st.markdown(f"• **{lift}**: {count} times ({pct:.0f}% of weeks)")
         else:
             st.success("No main lifts skipped!")
@@ -924,7 +928,7 @@ def create_skip_analysis():
                 st.markdown(f"• {cat.title()}: {count}")
 
     # Interpretation
-    main_skip_rate = skip_summary['total_main_skips'] / (81 * 3) * 100  # 3 main lifts per week
+    main_skip_rate = skip_summary['total_main_skips'] / (total_weeks * 3) * 100  # 3 main lifts per week
     st.markdown(f"""
     <div class="interpretation">
     <strong>Skip Analysis Summary</strong><br><br>
@@ -989,7 +993,7 @@ def main():
 
         # Detailed skip analysis (includes accessories)
         st.markdown("---")
-        create_skip_analysis()
+        create_skip_analysis(stats['total_weeks'])
 
         st.markdown("---")
         create_accessory_analysis()

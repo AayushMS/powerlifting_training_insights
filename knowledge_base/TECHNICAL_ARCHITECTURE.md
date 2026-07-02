@@ -14,11 +14,20 @@ training_insights/
 │   ├── data_processor.py   # Data loading and analytics
 │   └── interpretations.py  # Plain-English interpretations
 ├── knowledge_base/         # Documentation and context
-├── Aayush man .xlsx        # Training data (81 sheets, 1 per week)
+├── docs/archive/           # Historical planning docs
+├── Aayush man .xlsx        # Training data (105 sheets, 1 per week)
 ├── requirements.txt        # Python dependencies
-├── Dockerfile              # Container configuration
+├── Dockerfile              # Container configuration (runs src/app.py)
 └── docker-compose.yml      # Docker orchestration
 ```
+
+## Refreshing the Data
+The dashboard reads a static Excel export of the training-log Google Sheet. To update:
+1. Export the Google Sheet as `.xlsx` (File → Download → Microsoft Excel, or the Drive API).
+2. Drop the empty scratch tabs (`Sheet7`-`Sheet10`) so they aren't counted as weeks.
+3. Replace `Aayush man .xlsx` at the repo root.
+4. `load_training_data()` treats the first sheet as the newest week; ordering must stay
+   newest-first (top) to oldest-bottom.
 
 ## Key Components
 
@@ -38,7 +47,7 @@ Main data processing module with these key functions:
 
 ### Key Constants (in data_processor.py)
 ```python
-TRAINING_START_DATE = datetime(2024, 4, 1)  # Week 1 start
+TRAINING_START_DATE = datetime(2024, 3, 18)  # Week 1 start (approximate)
 ATHLETE_PROFILE = {...}  # Name, weight class, etc.
 COMPETITIONS = [...]     # Meet results
 GOAL_PRS = {...}         # Target PRs
