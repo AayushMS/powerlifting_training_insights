@@ -62,6 +62,8 @@ from interpretations import (
     TERM_DEFINITIONS
 )
 
+import chat_insights as ci
+
 # Page configuration
 st.set_page_config(
     page_title="Training Insights",
@@ -276,6 +278,11 @@ def create_hero_section(stats):
 
         st.progress(progress / 100)
         st.caption(f"🎯 {progress:.0f}% to {format_weight(total_goal)}kg (1yr)")
+        bt = ci.BEST_ACTUAL_TOTALS
+        st.caption(
+            f"ℹ️ Theoretical (sum of best-ever lifts). Best actual same-day: "
+            f"{bt['training']['total']}kg training · {bt['meet']['total']}kg meet"
+        )
 
 
 def create_summary_interpretation(stats):
@@ -429,6 +436,13 @@ def create_lift_section(lift: str, color: str):
             - Hard sets: {lift_data['rpe_high_pct']:.0f}%
             """)
 
+    # Coach's cues for this lift (mined from the coaching chat)
+    cues = ci.COACHING_CUES.get(lift)
+    if cues:
+        with st.expander(f"🗣️ Ojash's cues for {lift.replace('Bench Press', 'Bench')}"):
+            for cue in cues:
+                st.markdown(f"- {cue}")
+
 
 def create_lift_comparison(stats):
     """Create lift ratio analysis."""
@@ -530,11 +544,9 @@ def create_training_consistency(stats, freq_df):
         st.plotly_chart(fig, width='stretch')
 
     with col2:
-        # Consistency stats: weeks trained vs. calendar weeks in the span
-        calendar_weeks = max(
-            stats['total_weeks'],
-            int((stats['end_date'] - stats['start_date']).days / 7) + 1
-        )
+        # Consistency stats: weeks trained vs. calendar weeks over active stints
+        # (excludes long layoffs like the 2022->2024 gap)
+        calendar_weeks = stats.get('calendar_weeks', stats['total_weeks'])
         consistency_text = interpret_consistency(stats['total_weeks'], calendar_weeks)
         freq_text = interpret_sessions_per_week(stats['avg_sessions_per_week'])
 
@@ -661,57 +673,65 @@ def create_competition_history():
 
     for i, comp in enumerate(COMPETITIONS):
         with cols[i]:
-            place_text = f" • {comp['placement']}" if comp['placement'] else ""
+            place_text = f" • {comp['placement']}" if comp.get('placement') else ""
+            is_dl_only = comp.get('type') == 'deadlift-only'
+
+            if is_dl_only:
+                lifts_html = f"""
+                <div style="display: flex; justify-content: center;">
+                    <div><strong>Deadlift</strong><br>{format_weight(comp['deadlift'])}kg</div>
+                </div>"""
+                summary_html = '<p style="margin-top: 0.8rem; font-size: 1.2rem;"><strong>Deadlift-only meet</strong></p>'
+            else:
+                lifts_html = f"""
+                <div style="display: flex; justify-content: space-around;">
+                    <div><strong>S</strong><br>{format_weight(comp['squat'])}kg</div>
+                    <div><strong>B</strong><br>{format_weight(comp['bench'])}kg</div>
+                    <div><strong>D</strong><br>{format_weight(comp['deadlift'])}kg</div>
+                </div>"""
+                summary_html = f'<p style="margin-top: 0.8rem; font-size: 1.2rem;"><strong>{format_weight(comp["total"])}kg Total</strong></p>'
+
+            attempts_html = f'<p style="margin: 0; opacity: 0.9;">{comp["attempts"]} attempts</p>' if comp.get('attempts') else ""
+
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                         padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
                 <h4 style="margin: 0; color: white;">{comp['name']}</h4>
                 <p style="margin: 0.5rem 0; opacity: 0.9;">{comp['date'].strftime('%B %d, %Y')}{place_text}</p>
                 <hr style="border-color: rgba(255,255,255,0.3); margin: 0.8rem 0;">
-                <div style="display: flex; justify-content: space-around;">
-                    <div><strong>S</strong><br>{comp['squat']}kg</div>
-                    <div><strong>B</strong><br>{comp['bench']}kg</div>
-                    <div><strong>D</strong><br>{comp['deadlift']}kg</div>
-                </div>
-                <p style="margin-top: 0.8rem; font-size: 1.2rem;"><strong>{comp['total']}kg Total</strong></p>
-                <p style="margin: 0; opacity: 0.9;">{comp['attempts']} attempts</p>
+                {lifts_html}
+                {summary_html}
+                {attempts_html}
             </div>
             """, unsafe_allow_html=True)
 
             if comp.get('notes'):
                 st.caption(f"📝 {comp['notes']}")
 
-    # Meet-to-meet progress
-    if len(COMPETITIONS) >= 2:
-        comp_context = get_competition_context()
-        progress = comp_context['meet_to_meet_progress']
+    # Meet-to-meet progress (first vs last FULL meet)
+    comp_context = get_competition_context()
+    progress = comp_context['meet_to_meet_progress']
 
-        st.markdown("#### Progress Between Meets")
+    if progress:
+        last = progress['last']
+        st.markdown(f"#### Progress: {progress['first']['name']} → {last['name']}")
 
         col1, col2, col3, col4 = st.columns(4)
 
+        def _delta(v):
+            return f"+{format_weight(v)}kg" if v > 0 else f"{format_weight(v)}kg"
+
         with col1:
-            delta = progress['squat_gain']
-            st.metric("Squat", f"{COMPETITIONS[-1]['squat']}kg",
-                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
-
+            st.metric("Squat", f"{format_weight(last['squat'])}kg", _delta(progress['squat_gain']))
         with col2:
-            delta = progress['bench_gain']
-            st.metric("Bench", f"{COMPETITIONS[-1]['bench']}kg",
-                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
-
+            st.metric("Bench", f"{format_weight(last['bench'])}kg", _delta(progress['bench_gain']))
         with col3:
-            delta = progress['deadlift_gain']
-            st.metric("Deadlift", f"{COMPETITIONS[-1]['deadlift']}kg",
-                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
-
+            st.metric("Deadlift", f"{format_weight(last['deadlift'])}kg", _delta(progress['deadlift_gain']))
         with col4:
-            delta = progress['total_gain']
-            st.metric("Total", f"{COMPETITIONS[-1]['total']}kg",
-                      f"+{delta}kg" if delta > 0 else f"{delta}kg")
+            st.metric("Total", f"{format_weight(last['total'])}kg", _delta(progress['total_gain']))
 
         days = progress['time_between']
-        st.caption(f"🗓️ {days} days between meets ({days//30} months) • Attempts: {progress['attempts_improvement']}")
+        st.caption(f"🗓️ {days} days between these meets ({days//30} months) • Attempts: {progress['attempts_improvement']}")
 
 
 def create_block_summaries():
@@ -941,6 +961,100 @@ def create_skip_analysis(total_weeks: int):
     """, unsafe_allow_html=True)
 
 
+def create_injuries_section():
+    """Injuries, illness & recovery — from the coaching chat."""
+    st.markdown("### 🩹 Injuries, Illness & Recovery")
+    st.markdown("""
+    *The numbers show **what** happened; the coaching chat shows **why**. These are the
+    injuries and illnesses behind the dips — and the patterns worth acting on.*
+    """)
+
+    # Injury timeline
+    events = ci.INJURY_EVENTS
+    if events:
+        sev_rank = {'minor': 1, 'illness': 2, 'moderate': 2, 'major': 3}
+        sev_color = {'major': '#FF6B6B', 'moderate': '#FFA94D', 'minor': '#FCC419', 'illness': '#845EF7'}
+        fig = go.Figure()
+        for sev in ['major', 'moderate', 'illness', 'minor']:
+            pts = [e for e in events if e['severity'] == sev]
+            if not pts:
+                continue
+            fig.add_trace(go.Scatter(
+                x=[e['date'] for e in pts],
+                y=[sev_rank[e['severity']] for e in pts],
+                mode='markers',
+                name=sev.title(),
+                marker=dict(size=13, color=sev_color[sev], line=dict(width=1, color='white')),
+                text=[f"{e['area']} — {e['note']}<br><i>{e['lifts']}</i>" for e in pts],
+                hovertemplate="<b>%{x|%b %Y}</b><br>%{text}<extra></extra>"
+            ))
+        fig.update_layout(
+            height=260,
+            yaxis=dict(tickvals=[1, 2, 3], ticktext=['Minor', 'Moderate / Illness', 'Major'],
+                       range=[0.5, 3.5]),
+            xaxis_title="", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=10, r=10, t=20, b=20),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        )
+        st.plotly_chart(fig, width='stretch')
+
+    # Painless milestones — his strongest positive signal
+    if ci.PAINLESS_MILESTONES:
+        pain_free = " • ".join(
+            f"{m['date'].strftime('%b %Y')}: {m['note']}" for m in ci.PAINLESS_MILESTONES
+        )
+        st.success(f"✅ **Recovery turning points (pain-free sessions):** {pain_free}")
+
+    # Patterns & flags
+    st.markdown("#### Patterns worth acting on")
+    for title, body in ci.INJURY_PATTERNS:
+        st.markdown(f"""
+        <div class="insight-medium">
+        <strong>{title}</strong><br>{body}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Recovery toolkit
+    with st.expander("🧰 Recovery toolkit that has worked (reuse these)"):
+        for item in ci.RECOVERY_TOOLKIT:
+            st.markdown(f"- {item}")
+
+
+def create_mindset_section():
+    """Mindset, motivation & adherence — from the coaching chat."""
+    st.markdown("### 🧠 Mindset & Motivation")
+
+    for title, body in ci.MINDSET_INSIGHTS:
+        st.markdown(f"""
+        <div class="insight-low">
+        <strong>{title}</strong><br>{body}
+        </div>
+        """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**🔥 What drives you**")
+        for d in ci.MOTIVATION_DRIVERS:
+            st.markdown(f"- {d}")
+    with col2:
+        st.markdown("**⚠️ What derails you**")
+        for d in ci.STRESS_DRIVERS:
+            st.markdown(f"- {d}")
+
+
+def create_coach_playbook():
+    """Coach Ojash's most-repeated cues across all lifts."""
+    st.markdown("### 🗣️ Coach's Playbook")
+    st.markdown("*Ojash's most-repeated cues over 4.5 years — if you remember nothing else:*")
+
+    for cue in ci.TOP_CUES:
+        st.markdown(f"- {cue}")
+
+    with st.expander("⚙️ Programming & meet-day principles"):
+        for cue in ci.GENERAL_CUES:
+            st.markdown(f"- {cue}")
+
+
 def create_glossary():
     """Create a glossary of powerlifting terms."""
     with st.expander("📖 Glossary - What Do These Terms Mean?"):
@@ -997,6 +1111,16 @@ def main():
 
         st.markdown("---")
         create_accessory_analysis()
+
+        # Chat-derived sections (injuries / mindset / coaching cues)
+        st.markdown("---")
+        create_injuries_section()
+
+        st.markdown("---")
+        create_mindset_section()
+
+        st.markdown("---")
+        create_coach_playbook()
 
         st.markdown("---")
         create_insights_section()

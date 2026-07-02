@@ -15,7 +15,7 @@ training_insights/
 │   └── interpretations.py  # Plain-English interpretations
 ├── knowledge_base/         # Documentation and context
 ├── docs/archive/           # Historical planning docs
-├── Aayush man .xlsx        # Training data (105 sheets, 1 per week)
+├── Aayush man .xlsx        # Training data (117 sheets, 1 per week)
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile              # Container configuration (runs src/app.py)
 └── docker-compose.yml      # Docker orchestration
@@ -28,6 +28,13 @@ The dashboard reads a static Excel export of the training-log Google Sheet. To u
 3. Replace `Aayush man .xlsx` at the repo root.
 4. `load_training_data()` treats the first sheet as the newest week; ordering must stay
    newest-first (top) to oldest-bottom.
+
+**2022 prep block:** the 12 oldest sheets are the 2022 Ox Classic prep (from Ojash's
+"Aayush meet prep" sheet), appended at the end with an `Ox22 ` name prefix. They're
+detected by that prefix (`count_prep_2022_weeks`), dated from `PREP_2022_START`
+(Nov 2021) independently of the main timeline, and classified as the "Ox Classic 2022
+Prep" block. The ~2-year layoff is deliberately NOT a training break, so consistency
+and active-duration metrics ignore it.
 
 ## Key Components
 

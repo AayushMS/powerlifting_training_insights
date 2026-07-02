@@ -47,28 +47,68 @@ ATHLETE_PROFILE = {
 # =============================================================================
 # COMPETITION HISTORY
 # =============================================================================
+# 'type' is 'full' (S/B/D) or 'deadlift-only'. Deadlift-only meets use None for the
+# lifts they don't contest, and the UI renders them accordingly.
 COMPETITIONS = [
     {
+        'name': 'Ox Classic 2022',
+        'date': datetime(2022, 2, 13),
+        'type': 'full',
+        'squat': 180.0,
+        'bench': 110.0,
+        'deadlift': 222.5,
+        'total': 512.5,
+        'attempts': '',
+        'placement': '',
+        'notes': 'First competition'
+    },
+    {
+        'name': 'Deadlift Championship Nepal',
+        'date': datetime(2024, 3, 9),
+        'type': 'deadlift-only',
+        'squat': None,
+        'bench': None,
+        'deadlift': 250.0,
+        'total': None,
+        'attempts': '',
+        'placement': '',
+        'notes': 'Deadlift-only meet — first 250kg pull'
+    },
+    {
         'name': 'NYFC Classic 2024 Invitational',
-        'date': datetime(2024, 12, 9),
+        'date': datetime(2024, 12, 8),
+        'type': 'full',
         'squat': 220.0,
         'bench': 122.5,
         'deadlift': 250.0,
         'total': 592.5,
         'attempts': '8/9',
         'placement': '4th',
-        'notes': 'Missed 130kg bench on 3rd attempt'
+        'notes': 'Missed 130kg bench on 3rd attempt; competed with a 103.6°F fever'
     },
     {
         'name': 'OX Classic Summerslam',
         'date': datetime(2025, 4, 27),
+        'type': 'full',
         'squat': 220.0,
         'bench': 130.0,
         'deadlift': 255.0,
         'total': 605.0,
         'attempts': '9/9',
         'placement': '3rd',
-        'notes': 'Perfect meet! Made the bench that was missed at NYFC'
+        'notes': 'Perfect meet! Made the bench missed at NYFC; played safe for the podium'
+    },
+    {
+        'name': 'Iconic Clash Deadlift Championship',
+        'date': datetime(2026, 2, 7),
+        'type': 'deadlift-only',
+        'squat': None,
+        'bench': None,
+        'deadlift': 275.0,
+        'total': None,
+        'attempts': '3/3',
+        'placement': '',
+        'notes': 'Deadlift-only meet — 275kg PR (attempts 245/262.5/275), more in the tank'
     }
 ]
 
@@ -98,34 +138,51 @@ COLORS = {
     'deadlift': '#45B7D1'
 }
 
-# Known data anomalies to fix
+# Known data anomalies to fix. (sheet_name, exercise, wrong_value) -> corrected value,
+# or None to DISCARD the value entirely (used for phantom/template rows).
 KNOWN_ANOMALIES = {
-    # Sheet name, exercise, wrong value -> correct value
     (' building 45', 'Bench Press', 177.5): 117.5,
+    # 2022 prep sheets carry a phantom "Comp Bench Press" template row prescribed at
+    # 157.5kg (never performed) that otherwise reads as a bogus bench PR — discard it.
+    ('Ox22 Week 11', 'Bench Press', 157.5): None,
+    ('Ox22 Week 10', 'Bench Press', 157.5): None,
 }
 
 
-def week_to_date(week_order: int) -> datetime:
+# 2022 meet-prep block (Ox Classic, 13 Feb 2022) — a separate coaching stint that
+# predates the main continuous timeline by ~2 years. These weeks are appended to the
+# workbook (oldest week_order) with sheet names prefixed "Ox22 ". The ~2-year layoff
+# between this block and the March 2024 restart is NOT modeled as a training break, so
+# it doesn't distort consistency/duration — the two stints are dated independently.
+PREP_2022_START = datetime(2021, 11, 22)
+PREP_2022_PREFIX = 'ox22'
+
+
+def count_prep_2022_weeks(sheet_names) -> int:
+    """Number of sheets belonging to the 2022 prep block (by name prefix)."""
+    return sum(str(n).strip().lower().startswith(PREP_2022_PREFIX) for n in sheet_names)
+
+
+def _main_week_to_date(main_week_order: int) -> datetime:
+    """Approximate date for a week in the main (March 2024+) stint."""
+    base_date = TRAINING_START_DATE + timedelta(weeks=main_week_order - 1)
+    extra_weeks = sum(
+        brk['duration_weeks'] for brk in TRAINING_BREAKS if base_date >= brk['start']
+    )
+    return TRAINING_START_DATE + timedelta(weeks=main_week_order - 1 + extra_weeks)
+
+
+def week_to_date(week_order: int, n_prep: int = 0) -> datetime:
     """
-    Convert week order to approximate date, accounting for training breaks.
+    Convert week order to an approximate date.
 
-    The week_order represents consecutive training weeks (1 to 81).
-    We need to add break weeks when the date crosses break periods.
+    The oldest ``n_prep`` weeks belong to the 2022 prep stint and are dated from
+    PREP_2022_START; every later week is dated on the main March-2024+ timeline
+    (accounting for training breaks). With ``n_prep=0`` this is the original behaviour.
     """
-    # Start with the base calculation
-    base_date = TRAINING_START_DATE + timedelta(weeks=week_order - 1)
-
-    # Add break weeks for any breaks that occurred before this training week
-    extra_weeks = 0
-    for brk in TRAINING_BREAKS:
-        break_start = brk['start']
-        break_weeks = brk['duration_weeks']
-
-        # If our calculated date is after the break start, add the break duration
-        if base_date >= break_start:
-            extra_weeks += break_weeks
-
-    return TRAINING_START_DATE + timedelta(weeks=week_order - 1 + extra_weeks)
+    if 0 < week_order <= n_prep:
+        return PREP_2022_START + timedelta(weeks=week_order - 1)
+    return _main_week_to_date(week_order - n_prep)
 
 
 def format_date(dt: datetime) -> str:
@@ -311,7 +368,9 @@ def classify_block(sheet_name: str) -> Tuple[str, str]:
     """
     name = str(sheet_name).lower().strip()
 
-    if 'b5' in name:
+    if name.startswith('ox22'):
+        return 'Ox Classic 2022 Prep', 'prep'
+    elif 'b5' in name:
         return 'Block 5', 'build'
     elif 'b4' in name:
         return 'Block 4', 'build'
@@ -353,6 +412,7 @@ def load_training_data() -> pd.DataFrame:
     skipped_exercises = []
 
     total_sheets = len(xl.sheet_names)
+    n_prep = count_prep_2022_weeks(xl.sheet_names)
     is_latest_week = True  # First sheet in Excel is the latest
 
     for sheet_idx, sheet_name in enumerate(xl.sheet_names):
@@ -362,7 +422,7 @@ def load_training_data() -> pd.DataFrame:
         week_order = total_sheets - sheet_idx
 
         # Calculate approximate date for this week
-        training_date = week_to_date(week_order)
+        training_date = week_to_date(week_order, n_prep)
 
         # Get block classification
         block_name, block_type = classify_block(sheet_name)
@@ -400,7 +460,7 @@ def load_training_data() -> pd.DataFrame:
 
             # Parse values
             try:
-                prescribed = parse_weight(row.iloc[2]) if len(row) > 2 else None
+                prescribed = parse_weight(row.iloc[2], sheet_name=sheet_name, exercise=canonical) if len(row) > 2 else None
                 actual_raw = row.iloc[3] if len(row) > 3 else None
                 actual = parse_weight(actual_raw, prescribed=prescribed, sheet_name=sheet_name, exercise=canonical)
                 rpe = parse_rpe(row.iloc[4]) if len(row) > 4 else None
@@ -470,12 +530,13 @@ def _get_skipped_exercises_internal() -> pd.DataFrame:
         xl = pd.ExcelFile(DATA_FILE)
         skipped_exercises = []
         total_sheets = len(xl.sheet_names)
+        n_prep = count_prep_2022_weeks(xl.sheet_names)
         is_latest_week = True
 
         for sheet_idx, sheet_name in enumerate(xl.sheet_names):
             df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
             week_order = total_sheets - sheet_idx
-            training_date = week_to_date(week_order)
+            training_date = week_to_date(week_order, n_prep)
 
             for i, row in df.iterrows():
                 cell0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
@@ -749,8 +810,14 @@ def get_summary_stats() -> Dict:
     min_date = df['training_date'].min()
     max_date = df['training_date'].max()
 
+    # Calendar weeks over ACTIVE stints (trained weeks + planned break weeks),
+    # excluding long layoffs like the 2022->2024 gap so consistency isn't distorted.
+    total_weeks = df['week_order'].nunique()
+    break_weeks = sum(brk['duration_weeks'] for brk in TRAINING_BREAKS)
+
     return {
-        'total_weeks': df['week_order'].nunique(),
+        'total_weeks': total_weeks,
+        'calendar_weeks': total_weeks + break_weeks,
         'total_sessions': int(df.groupby('week_order')['session_order'].max().sum()),
         'total_entries': len(df),
         'avg_sessions_per_week': freq['sessions_per_week'].mean(),
@@ -767,7 +834,9 @@ def get_summary_stats() -> Dict:
         'total_pr': sum(prs.values()),
         'start_date': min_date,
         'end_date': max_date,
-        'training_duration_months': (max_date - min_date).days / 30,
+        # Active training months (trained + break weeks), not the raw calendar span —
+        # avoids counting the ~2-year 2022->2024 layoff as "training".
+        'training_duration_months': (total_weeks + break_weeks) / 4.33,
     }
 
 
@@ -1069,12 +1138,13 @@ def get_all_skipped_exercises() -> pd.DataFrame:
     xl = pd.ExcelFile(DATA_FILE)
     skipped_exercises = []
     total_sheets = len(xl.sheet_names)
+    n_prep = count_prep_2022_weeks(xl.sheet_names)
     is_latest_week = True
 
     for sheet_idx, sheet_name in enumerate(xl.sheet_names):
         df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
         week_order = total_sheets - sheet_idx
-        training_date = week_to_date(week_order)
+        training_date = week_to_date(week_order, n_prep)
 
         for i, row in df.iterrows():
             cell0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
@@ -1230,14 +1300,17 @@ def get_competition_context() -> Dict:
 
 
 def _calculate_meet_progress() -> Dict:
-    """Calculate progress between meets."""
-    if len(COMPETITIONS) < 2:
+    """Calculate progress between the first and last FULL (S/B/D) meets."""
+    full_meets = [c for c in COMPETITIONS if c.get('type', 'full') == 'full' and c.get('total')]
+    if len(full_meets) < 2:
         return {}
 
-    first = COMPETITIONS[0]
-    last = COMPETITIONS[-1]
+    first = full_meets[0]
+    last = full_meets[-1]
 
     return {
+        'first': first,
+        'last': last,
         'squat_gain': last['squat'] - first['squat'],
         'bench_gain': last['bench'] - first['bench'],
         'deadlift_gain': last['deadlift'] - first['deadlift'],

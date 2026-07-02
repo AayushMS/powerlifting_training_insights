@@ -14,7 +14,7 @@ A beautiful, data-driven dashboard for analyzing powerlifting training progress.
 
 ## Features
 
-- **105 Weeks of Training Data** - Comprehensive analysis of long-term progression
+- **117 Weeks of Training Data** - The 2022 Ox Classic prep block plus the continuous Mar 2024–mid 2026 stint
 - **Main Lift Tracking** - Squat, Bench Press, Deadlift progression with trend lines
 - **Volume Analysis** - Weekly tonnage and sets distribution
 - **RPE/Intensity Analysis** - Training intensity distribution with optimal zone highlighting
@@ -91,12 +91,22 @@ The dashboard reads from an Excel file with the following structure:
 
 ## Key Insights
 
-Based on 105 weeks of training data (Mar 2024 – mid 2026):
+Based on 117 weeks of training data (2022 Ox Classic prep + Mar 2024 – mid 2026):
 
 1. **Bench Press Focus Needed** - Current bench (135kg) is 61% of squat (220kg), below the ideal 65-80% ratio
-2. **Conservative Training** - Average RPE of 6.3 leaves room for more intensity on main lifts
+2. **Conservative Training** - Average RPE of ~6.4 leaves room for more intensity on main lifts
 3. **Strong Deadlift** - Deadlift/Squat ratio of 125% (deadlift now at a 275kg PR) sits at the top of the optimal range
-4. **Consistent Training** - Averaging 3.7 sessions per week across 105 training weeks and 387 sessions
+4. **Consistent Training** - Averaging ~3.7 sessions per week across 117 training weeks and ~389 sessions
+
+## Competition History
+
+| Date | Meet | Squat | Bench | Deadlift | Total |
+|------|------|-------|-------|----------|-------|
+| Feb 13, 2022 | Ox Classic 2022 | 180 | 110 | 222.5 | 512.5 |
+| Mar 9, 2024 | Deadlift Championship Nepal | — | — | 250 | — |
+| Dec 8, 2024 | NYFC Classic | 220 | 122.5 | 250 | 592.5 |
+| Apr 27, 2025 | OX Classic Summerslam | 220 | 130 | 255 | 605 |
+| Feb 7, 2026 | Iconic Clash Deadlift Championship | — | — | 275 | — |
 
 ## Technology Stack
 

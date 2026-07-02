@@ -14,6 +14,13 @@ KNOWN_ANOMALIES = {
 }
 ```
 
+### 157.5kg Phantom Bench (2022 prep)
+- **Issue:** The 2022 prep sheets carry a duplicate "Comp Bench Press" template row
+  prescribed at 157.5kg (never performed — actual is blank), which read as a bogus 157.5
+  bench PR after the 2022 data was merged.
+- **Fix:** Mapped to `None` in `KNOWN_ANOMALIES` (a `None` value now means "discard"), and
+  the prescribed-weight parse is anomaly-aware so phantom prescribed-only rows are dropped.
+
 ## Technical Issues
 
 ### Excel/Google-Sheets Date Format in RPE Column
@@ -42,9 +49,12 @@ KNOWN_ANOMALIES = {
 ### Week Ordering
 - Excel sheets are ordered newest-first
 - `week_order` is calculated as `total_sheets - sheet_idx`
-- Week 1 ≈ March 2024, Week 105 ≈ mid 2026
+- 117 weeks total: weeks 1-12 are the 2022 prep block (`Ox22 ` sheets, ~Nov 2021-Feb
+  2022), weeks 13+ are the main stint (Week 13 ≈ Mar 2024, newest ≈ mid 2026).
 - Empty scratch tabs (`Sheet7`-`Sheet10`) must be dropped from the export or they
   inflate `total_sheets` and shift every week's computed date.
+- The 2022 prep block is detected by the `Ox22 ` name prefix and dated independently; the
+  2-year layoff before Mar 2024 is not a training break (see TECHNICAL_ARCHITECTURE.md).
 
 ### Missing Weeks (source-sheet gaps)
 - Some block weeks were never duplicated in the Google Sheet: **build up 2/5,
