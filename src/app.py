@@ -13,6 +13,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import re
 import sys
 from pathlib import Path
 
@@ -188,6 +189,15 @@ def format_weight(w):
     return f"{w:.1f}"
 
 
+def html_bold(text):
+    """Convert markdown **bold** to <strong> for use inside raw-HTML blocks.
+
+    Streamlit does not parse markdown inside HTML blocks, so **x** would render
+    as literal asterisks — this makes injected interpretation strings render right.
+    """
+    return re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', str(text))
+
+
 def create_header(stats):
     """Create the header with title, athlete profile, and date range."""
     col1, col2 = st.columns([3, 1])
@@ -298,12 +308,11 @@ def create_summary_interpretation(stats):
         st.markdown(f"""
         <div class="interpretation">
         <strong>Your Training Journey</strong><br><br>
-
-        Over the past **{int(stats['training_duration_months'])} months**, you've:
+        Over the past <strong>{int(stats['training_duration_months'])} months</strong>, you've:
         <ul>
-            <li>Trained **{stats['total_weeks']} weeks** with {stats['total_sessions']} total sessions</li>
-            <li>Averaged **{stats['avg_sessions_per_week']:.1f} sessions per week**</li>
-            <li>Lifted {tonnage_text}</li>
+            <li>Trained <strong>{stats['total_weeks']} weeks</strong> with {stats['total_sessions']} total sessions</li>
+            <li>Averaged <strong>{stats['avg_sessions_per_week']:.1f} sessions per week</strong></li>
+            <li>Lifted {html_bold(tonnage_text)}</li>
         </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -314,11 +323,8 @@ def create_summary_interpretation(stats):
         st.markdown(f"""
         <div class="interpretation">
         <strong>Training Intensity</strong><br><br>
-
-        Your average effort level is **{stats['mean_rpe']:.1f}/10** ({rpe_interp['level']}).<br><br>
-
+        Your average effort level is <strong>{stats['mean_rpe']:.1f}/10</strong> ({rpe_interp['level']}).<br><br>
         {rpe_interp['meaning']}<br><br>
-
         <em>{rpe_interp['implication']}</em>
         </div>
         """, unsafe_allow_html=True)
@@ -474,8 +480,8 @@ def create_lift_comparison(stats):
         st.markdown(f"""
         <div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid {status_color};">
         <h4>{bench_ratio['emoji']} Bench Press vs Squat</h4>
-        <p>{bench_ratio['detail']}</p>
-        <p><strong>→ {bench_ratio['action']}</strong></p>
+        <p>{html_bold(bench_ratio['detail'])}</p>
+        <p><strong>→ {html_bold(bench_ratio['action'])}</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -492,8 +498,8 @@ def create_lift_comparison(stats):
         st.markdown(f"""
         <div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid {status_color};">
         <h4>{dl_ratio['emoji']} Deadlift vs Squat</h4>
-        <p>{dl_ratio['detail']}</p>
-        <p><strong>→ {dl_ratio['action']}</strong></p>
+        <p>{html_bold(dl_ratio['detail'])}</p>
+        <p><strong>→ {html_bold(dl_ratio['action'])}</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -552,9 +558,9 @@ def create_training_consistency(stats, freq_df):
 
         st.markdown(f"""
         <div class="interpretation">
-        {consistency_text}
+        {html_bold(consistency_text)}
         <br><br>
-        {freq_text}
+        {html_bold(freq_text)}
         </div>
         """, unsafe_allow_html=True)
 
@@ -635,7 +641,7 @@ def create_insights_section():
             st.markdown(f"""
             <div class="insight-high">
             <strong>{insight['title']}</strong><br>
-            {insight['message']}
+            {html_bold(insight['message'])}
             </div>
             """, unsafe_allow_html=True)
 
@@ -645,7 +651,7 @@ def create_insights_section():
             st.markdown(f"""
             <div class="insight-medium">
             <strong>{insight['title']}</strong><br>
-            {insight['message']}
+            {html_bold(insight['message'])}
             </div>
             """, unsafe_allow_html=True)
 
@@ -655,7 +661,7 @@ def create_insights_section():
             st.markdown(f"""
             <div class="insight-low">
             <strong>{insight['title']}</strong><br>
-            {insight['message']}
+            {html_bold(insight['message'])}
             </div>
             """, unsafe_allow_html=True)
 
@@ -949,12 +955,11 @@ def create_skip_analysis(total_weeks: int):
 
     # Interpretation
     main_skip_rate = skip_summary['total_main_skips'] / (total_weeks * 3) * 100  # 3 main lifts per week
+    skip_verdict = "Excellent consistency!" if main_skip_rate < 10 else "Room for improvement" if main_skip_rate < 20 else "Consider addressing barriers to consistency"
     st.markdown(f"""
     <div class="interpretation">
     <strong>Skip Analysis Summary</strong><br><br>
-
-    Main lift skip rate: **{main_skip_rate:.1f}%** - {"Excellent consistency!" if main_skip_rate < 10 else "Room for improvement" if main_skip_rate < 20 else "Consider addressing barriers to consistency"}<br><br>
-
+    Main lift skip rate: <strong>{main_skip_rate:.1f}%</strong> - {skip_verdict}<br><br>
     Accessory skip rate is naturally higher as these are often adjusted based on fatigue and time constraints.
     The key is maintaining consistency with main lifts, which you're doing {"well" if main_skip_rate < 15 else "adequately"}.
     </div>
