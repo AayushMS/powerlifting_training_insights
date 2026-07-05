@@ -30,8 +30,8 @@ A comprehensive training analytics dashboard for powerlifters. Ingest your train
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/training_insights.git
-cd training_insights
+git clone https://github.com/AayushMS/powerlifting_training_insights.git
+cd powerlifting_training_insights
 ```
 
 ### 2. Set Up Environment Variables
@@ -120,7 +120,7 @@ DB_PASSWORD = "your_password"
 ## Project Structure
 
 ```
-training_insights/
+powerlifting_training_insights/
 ├── src/
 │   ├── __init__.py
 │   ├── dashboard.py      # Streamlit dashboard
